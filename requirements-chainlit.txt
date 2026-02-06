@@ -1,0 +1,4 @@
+chainlit>=2.9.5
+requests~=2.32.4
+pydantic>=2.5.0
+dotenv
