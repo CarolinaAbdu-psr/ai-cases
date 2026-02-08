@@ -50,7 +50,7 @@ class GatewayClient:
         Create a new chat session
 
         Args:
-            agent_type: Type of agent (factory, psrio, knowledge_hub)
+            agent_type: Type of agent 
             model: Model name to use
             language: Chat language (default: en)
             user_id: Optional user identifier

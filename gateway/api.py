@@ -147,7 +147,7 @@ async def redownload_rags(background_tasks: BackgroundTasks, agent_type: str = N
     Force redownload of RAG vectorstores from S3
 
     Parameters:
-    - agent_type (optional): Specific agent to redownload ('factory', 'psrio', 'knowledge_hub')
+    - agent_type (optional): Specific agent to redownload
                             If not provided, redownloads all agents
 
     Returns:
