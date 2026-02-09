@@ -1,0 +1,14 @@
+"""
+async def main():
+    # Ask the user for the study path and store it in the user session
+    cl.user_session.set("study_path", None)
+    res = await cl.AskUserMessage(content="Provide Study_Path", timeout=30).send()
+    if res:
+        study_path = res.get('output')
+        if study_path:
+            cl.user_session.set("study_path", study_path)
+            await cl.Message(content=f"Study path set: {study_path}").send()
+            await start()
+        else:
+            await cl.Message(content="No study path provided.").send()
+"""

@@ -35,6 +35,7 @@ class SessionCreateRequest(BaseModel):
     model: str
     language: str = "en"
     user_id: Optional[str] = None
+    study_path :str
     metadata: Optional[Dict[str, Any]] = None
 
 

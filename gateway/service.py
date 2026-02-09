@@ -48,6 +48,7 @@ class SessionManager:
         chain, memory = rag.initialize(
             model=request.model,
             chat_language=request.language,
+            study_path = request.study_path,
             agent_type=request.agent_type.value
         )
 
@@ -263,6 +264,7 @@ class GatewayService:
         thread_id = session["thread_id"]
         agent_type = session["agent_type"].value
         language = session["language"]
+        study_path = session["study_path"]
 
         try:
             config = {"configurable": {"thread_id": thread_id}}

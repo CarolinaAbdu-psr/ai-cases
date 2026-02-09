@@ -42,6 +42,7 @@ class GatewayClient:
         self,
         agent_type: AgentType,
         model: str,
+        study_path : str,
         language: str = "en",
         user_id: Optional[str] = None,
         metadata: Optional[dict] = None
@@ -59,14 +60,15 @@ class GatewayClient:
         Returns:
             SessionCreateResponse with session details
         """
+      
         request = SessionCreateRequest(
             agent_type=agent_type,
             model=model,
             language=language,
             user_id=user_id,
+            study_path= study_path,
             metadata=metadata
         )
-
         response = self.session.post(
             f"{self.base_url}/sessions",
             json=request.model_dump(),

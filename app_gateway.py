@@ -24,6 +24,9 @@ GATEWAY_URL = os.getenv("GATEWAY_URL", "http://localhost:8000")
 gateway_client = GatewayClient(base_url=GATEWAY_URL)
 
 
+STUDY_PATH = r"D:\01-Repositories\Factory Automations\factory-graphs\Bolivia"
+
+
 async def process_uploaded_files(files):
     """Process uploaded files and convert to gateway format"""
     file_attachments = []
@@ -125,19 +128,6 @@ async def chat_profile():
 
 
 @cl.on_chat_start
-async def main():
-    # Ask the user for the study path and store it in the user session
-    res = await cl.AskUserMessage(content="Study_Path", timeout=10).send()
-    if res:
-        study_path = res.get('output')
-        if study_path:
-            cl.user_session.set("study_path", study_path)
-            await cl.Message(content=f"Study path set: {study_path}").send()
-        else:
-            await cl.Message(content="No study path provided.").send()
-
-    # Continue initialization (start session) using the provided study path if any
-    await start()
 async def start():
     """Initialize the chat session"""
     # Check API keys
@@ -162,6 +152,7 @@ async def start():
     cl.user_session.set("agent_name", agent_name)
     cl.user_session.set("model", default_model)
     cl.user_session.set("chat_language", current_language)
+    cl.user_session.set("study_path", STUDY_PATH)
 
     # Create session via gateway
     try:
@@ -173,18 +164,11 @@ async def start():
             "agent_type": agent_type,
             "model": default_model,
             "language": current_language,
+            "study_path": STUDY_PATH,
             "user_id": cl.user_session.get("id"),
         }
-        study_path = cl.user_session.get("study_path")
-        if study_path:
-            create_kwargs["study_path"] = study_path
 
-        try:
-            session_response = gateway_client.create_session(**create_kwargs)
-        except TypeError:
-            # Fallback if the client doesn't accept study_path
-            create_kwargs.pop("study_path", None)
-            session_response = gateway_client.create_session(**create_kwargs)
+        session_response = gateway_client.create_session(**create_kwargs)
 
         # Store session info
         cl.user_session.set("gateway_session_id", session_response.session_id)

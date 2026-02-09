@@ -22,6 +22,8 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
 from typing_extensions import TypedDict
+from helper.common import get_vectorstore_base_path
+from helper import rag_common
 
 
 logging.basicConfig(level=logging.INFO)
@@ -188,7 +190,7 @@ class RAGAgent:
     
 
 
-def initialize(model: str) :
+def initialize(model: str, chat_language: str, study_path, agent_type: str = "factory") -> Tuple[StateGraph, MemorySaver]:
     """Initialize the LLM and return the compiled LangGraph workflow and memory."""
 
     try:
@@ -210,7 +212,16 @@ def initialize(model: str) :
         else:
             llm = ChatOpenAI(model_name="gpt-4.1", temperature=0.7, max_tokens=MAX_TOKENS, request_timeout=REQUEST_TIMEOUT)
 
-        return llm
+        global STUDY  
+        STUDY = psr.factory.load_study(study_path)
+
+        app, memory = create_langgraph_workflow(llm)
+        
+        return app, memory
+
+    except Exception as e:
+        logger.error(f"Error initializing RAG: {str(e)}")
+        raise
     
     except Exception as e:
         logger.error(f"Error initializing RAG: {e}")
@@ -231,7 +242,6 @@ def load_vectorstore() -> Chroma:
             client_settings=chromadb.config.Settings(anonymized_telemetry=False)
         )
     raise ValueError(f"Vectorstore not found: {persist_directory}")
-
 
 
 def format_properties(docs: List) -> str:
@@ -269,7 +279,7 @@ def format_properties(docs: List) -> str:
         
     return "\n\n" + "\n\n".join(formatted_blocks)
 
-@tool
+
 def retrive_properties(state:AgentState)->str:
     """
     Retrieve detailed information about available object types and their properties from the SDDP study.
@@ -295,7 +305,7 @@ def retrive_properties(state:AgentState)->str:
         tb = traceback.format_exc()
         return f"TOOL_ERROR: retrive_properties failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify vectorstore exists and the last message content is valid."
 
-@tool 
+
 def get_available_names(objctype):
     """Get all names (list of available instances) for a given object type in the study.
     
@@ -318,7 +328,7 @@ def get_available_names(objctype):
         tb = traceback.format_exc()
         return f"TOOL_ERROR: get_available_names failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify object type name and that STUDY is loaded."
 
-@tool 
+
 def count_objects_by_type(object_type):
     """Get the count of a object type.
     
@@ -338,7 +348,7 @@ def count_objects_by_type(object_type):
         tb = traceback.format_exc()
         return f"TOOL_ERROR: count_objects_by_type failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify object type and STUDY."
 
-@tool 
+
 def get_all_objects():
     """Get all objects with its types, codes and names
     
@@ -354,7 +364,7 @@ def get_all_objects():
         tb = traceback.format_exc()
         return f"TOOL_ERROR: get_all_objects failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: ensure STUDY is loaded and accessible."
 
-@tool 
+
 def find_by_name(objtype, name):
     """Find a specific object by its exact name/identifier.
     
@@ -377,7 +387,7 @@ def find_by_name(objtype, name):
         tb = traceback.format_exc()
         return f"TOOL_ERROR: find_by_name failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify object type and exact name."
 
-@tool 
+
 def get_static_property(type, property_name, object_name):
     """Get the value of a static property for a specific object or all objects of a type.
     
@@ -411,7 +421,7 @@ def get_static_property(type, property_name, object_name):
         tb = traceback.format_exc()
         return f"TOOL_ERROR: get_static_property failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify type, property_name and object_name."
     
-@tool 
+
 def get_dynamic_property(type, property_name, object_name):
     """Get the value of a dynamic property for a specific object or all objects of a type.
     
@@ -437,7 +447,6 @@ def get_dynamic_property(type, property_name, object_name):
         return f"TOOL_ERROR: get_static_property failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify type, property_name and object_name."
 
 
-@tool 
 def find_by_property_condition(type, property_name, property_condition, condition_value):
     """Find all objects of a given type that match a property condition.
     
@@ -478,7 +487,7 @@ def find_by_property_condition(type, property_name, property_condition, conditio
         tb = traceback.format_exc()
         return f"TOOL_ERROR: find_by_property_condition failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify type and property_name, and that values are comparable."
 
-@tool 
+
 def sum_by_property_condition(type, property_name, property_condition, condition_value):
     """Calculate the sum of a property across all objects matching a condition.
     
@@ -517,7 +526,7 @@ def sum_by_property_condition(type, property_name, property_condition, condition
         tb = traceback.format_exc()
         return f"TOOL_ERROR: sum_by_property_condition failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify type, property_name and that property values are numeric."
 
-@tool 
+
 def count_by_property_condition(type, property_name, property_condition, condition_value):
     """Count how many objects of a type match a property condition.
     
@@ -565,7 +574,7 @@ def check_refererence(refs, reference_name):
             return True
     return match
 
-@tool 
+
 def find_by_reference(type, reference_type, reference_name):
     """Find all objects of a type that are linked to a specific reference object.
     
@@ -600,7 +609,8 @@ def find_by_reference(type, reference_type, reference_name):
         tb = traceback.format_exc()
         return f"TOOL_ERROR: find_by_reference failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify reference_type and reference_name, and that STUDY is loaded."
 
-@tool
+
+
 def count_by_reference(type, reference_type, reference_name):
     """Count how many objects of a type are linked to a specific reference object.
     
@@ -635,7 +645,7 @@ def count_by_reference(type, reference_type, reference_name):
         tb = traceback.format_exc()
         return f"TOOL_ERROR: count_by_reference failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify reference parameters and STUDY."
 
-@tool
+
 def sum_property_by_reference(type, reference_type, reference_name, property):
     """Sum a property across all objects linked to a specific reference object.
     
@@ -671,7 +681,7 @@ def sum_property_by_reference(type, reference_type, reference_name, property):
         tb = traceback.format_exc()
         return f"TOOL_ERROR: sum_property_by_reference failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify reference and property names and that property values are numeric."
 
-@tool
+
 def summarize_object(type,name): 
     """Get a dict with all properties of on given object 
     
@@ -725,7 +735,7 @@ def get_conections(obj, next_level_objs):
 
     return connections, next_level_objs
 
-@tool 
+
 def get_neighboors(type,name, max_level=1):
     """
     Inspect neighborhood (references) for a study object and return relation triples.
@@ -772,56 +782,36 @@ def get_neighboors(type,name, max_level=1):
         return f"TOOL_ERROR: get_neighboors failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify type, name and max_level."
 
 
-if __name__ == "__main__":
-    import sys
-    parser = argparse.ArgumentParser(description="RAG Agent - Translate questions to Cypher and answer them with RAG + auto-fix tools")
-    parser.add_argument("-m", "--model", default="gpt-4.1", help="LLM model to be used. Default: gpt-4.1")
-    parser.add_argument("-s", "--study_path", required=True, help="Path to the study files required to load the graph schema into Neo4j.")
-    parser.add_argument("-q", "--query", required=True, help="Natural language question to be processed by the agent.")
-    args = parser.parse_args()
-    model = args.model
-    study_path = args.study_path
-    user_input = args.query
+def create_langgraph_workflow(llm: BaseChatOpenAI):
+
+    tools = [retrive_properties, get_available_names, get_all_objects, find_by_name, get_static_property, get_dynamic_property,
+            find_by_property_condition, count_by_property_condition, sum_by_property_condition,
+            find_by_reference, count_by_reference, sum_property_by_reference,get_neighboors,summarize_object]
+
+    initial_message = HumanMessage(content=user_input)
+    messages = [initial_message]
+    
+    # Create agent with system prompt (as string, not list)
+    agent = RAGAgent(llm, tools, SYSTEM_PROMPT_TEMPLATE)
+
+    memory = MemorySaver()
+    
+    app = agent.workflow.invoke({'messages': messages})
+    
+    return app, memory
+
+# -------------------------------------------------------
+# Vectorstore download functions
+#--------------------------------------------------------
+
+# Delegate to common RAG utilities
+get_rag_list = rag_common.get_rag_list
+get_rag_list_with_dates = rag_common.get_rag_list_with_dates
+extract_rag_to_folder = rag_common.extract_rag_to_folder
+get_latest_rag_date = rag_common.get_latest_rag_date
+download_rag = rag_common.download_rag
+download_latest_rag = rag_common.download_latest_rag
 
 
-    logger.info("--- Starting RAG Agent ---")
-    logger.info(f"Selected model: {model}")
-    logger.info(f"Study path: {study_path}")
-    logger.info(f"User question: {user_input}")
-    try:
-        global STUDY
-        STUDY = psr.factory.load_study(study_path)
-        logger.info("Study loaded successfully.")
-        
-        llm = initialize(model)
-        logger.info("LLM initialized.")
-        
-        tools = [retrive_properties, get_available_names, get_all_objects, find_by_name, get_static_property, get_dynamic_property,
-                 find_by_property_condition, count_by_property_condition, sum_by_property_condition,
-                 find_by_reference, count_by_reference, sum_property_by_reference,get_neighboors,summarize_object]
-        
-        # Initialize agent with system prompt and user query
-        initial_message = HumanMessage(content=user_input)
-        messages = [initial_message]
-        
-        # Create agent with system prompt (as string, not list)
-        agent = RAGAgent(llm, tools, SYSTEM_PROMPT_TEMPLATE)
-        logger.info("Agent initialized with tools and system prompt.")
-        
-        # Invoke workflow
-        result = agent.workflow.invoke({'messages': messages})
-        logger.info("Workflow execution completed.")
-        
-        # Extract and display final response
-        if "messages" in result and result["messages"]:
-            final_response = result["messages"][-1].content
-            print("\n==============================================")
-            print("AGENT FINAL RESPONSE:")
-            print(final_response)
-            print("==============================================\n")
-        else:
-            logger.warning("Workflow executed but no answer generated.")
-    except Exception as e:
-        logger.error("--- CRITICAL ERROR ---")
-        logger.error(f"Error Detail: {type(e).__name__}: {str(e)}")
-        sys.exit(1)
+
+
