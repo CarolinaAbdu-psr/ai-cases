@@ -24,7 +24,7 @@ GATEWAY_URL = os.getenv("GATEWAY_URL", "http://localhost:8000")
 gateway_client = GatewayClient(base_url=GATEWAY_URL)
 
 
-STUDY_PATH = r"D:\01-Repositories\Factory Automations\factory-graphs\Bolivia"
+STUDY_PATH = r"C:\PSR\SDDP18.0\examples\operation\1_stage\Case01"
 
 
 async def process_uploaded_files(files):
@@ -300,15 +300,11 @@ async def main(message: cl.Message):
                 "message": message.content,
                 "files": file_attachments if file_attachments else None,
             }
-            study_path = cl.user_session.get("study_path")
-            if study_path:
-                chat_kwargs["study_path"] = study_path
-
             try:
                 response = gateway_client.chat(**chat_kwargs)
             except TypeError:
                 # Fallback if the client doesn't accept study_path
-                chat_kwargs.pop("study_path", None)
+                
                 response = gateway_client.chat(**chat_kwargs)
 
             # Update step to show completion

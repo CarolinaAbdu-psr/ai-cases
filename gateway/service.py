@@ -18,6 +18,8 @@ from .models import (
     SessionInfo,
 )
 
+from langchain_core.messages import HumanMessage
+
 logger = logging.getLogger(__name__)
 
 
@@ -58,6 +60,7 @@ class SessionManager:
             "agent_type": request.agent_type,
             "model": request.model,
             "language": request.language,
+            "study_path":request.study_path,
             "chain": chain,
             "memory": memory,
             "thread_id": f"thread_{session_id}",
@@ -160,7 +163,7 @@ class SessionManager:
         Returns:
             datetime: The date of the RAG version
         """
-        rag = self._get_rag_module(agent_type.split('_')[0])
+        rag = self._get_rag_module(agent_type)
         persist_directory = rag.get_vectorstore_directory(agent_type)
         rag_date_file = os.path.join(persist_directory, "rag_date.txt")
         rag_version_file = os.path.join(persist_directory, "rag_version.txt")
@@ -353,7 +356,7 @@ class GatewayService:
                 "input": full_message,
                 "chat_language": language,
                 "agent_type": agent_type,
-                "messages": []
+                "messages": [HumanMessage(content=full_message)]
             }, config=config)
 
             if "messages" in result and result["messages"]:
@@ -457,7 +460,7 @@ class GatewayService:
 
             for agent_type in agent_types:
                 try:
-                    rag = self.session_manager._get_rag_module(agent_type.split('_')[0])
+                    rag = self.session_manager._get_rag_module(agent_type)
                     persist_directory = rag.get_vectorstore_directory(agent_type)
                     rag_version_file = os.path.join(persist_directory, "rag_version.txt")
                     rag_date_file = os.path.join(persist_directory, "rag_date.txt")
