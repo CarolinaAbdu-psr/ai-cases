@@ -105,24 +105,18 @@ async def chat_profile():
         cl.ChatProfile(
             name="Case Input",
             markdown_description="Helper specialized in input data",
-            starters=[
-                cl.Starter(
-                    label="Get me SDDP Requirements",
-                    message="What are the system requirements for installing SDDP?",
-                    icon= "/public/starter/edit.svg",
-                   
-                ),
-                cl.Starter(
-                    label="Explain OptGen Strategies",
-                    message="Explain how the optimization strategies in OptGen work.",
-                    icon ="/public/starter/graduation-cap.svg" ,
-                ),
-                cl.Starter(
-                    label="Battery Modeling",
-                    message="What is the methodology for modeling a battery?",
-                    icon = "/public/starter/idea.svg",
-                ),
-            ]
+        ),
+        cl.ChatProfile(
+            name="Case Compare",
+            markdown_description="Helper specialized in compare cases",
+        ),
+        cl.ChatProfile(
+            name="Case Output",
+            markdown_description="Helper specialized in cases output data",
+        ),
+        cl.ChatProfile(
+            name="Case Edit",
+            markdown_description="Helper specialized in edit cases",
         ),
     ]
 
@@ -136,13 +130,21 @@ async def start():
 
     # Get chat profile and map to agent type
     chat_profile = cl.user_session.get("chat_profile")
+    logger.warning(f"Chatprofilr is {chat_profile}")
 
     if chat_profile == "Case Input":
         agent_type = AgentType.CASE_INPUT
         agent_name = "Case Input"
-    else:
-        agent_type = AgentType.CASE_INPUT
-        agent_name = "Case Input"
+    if chat_profile == "Case Compare":
+        agent_type = AgentType.CASE_COMPARE
+        agent_name = "Case Compare"
+    if chat_profile == "Case Output":
+        agent_type = AgentType.CASE_OUTPUT
+        agent_name = "Case Output"
+    if chat_profile == "Case Edit":
+        agent_type = AgentType.CASE_EDIT
+        agent_name = "Case Edit"
+
 
     # Get default model
     default_model = helper.models.DEFAULT_MODEL.name

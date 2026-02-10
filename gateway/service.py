@@ -7,7 +7,10 @@ import uuid
 from typing import Dict, Tuple, Optional, Any
 
 import helper.models
-import helper.rag_input_cases
+import helper.input_cases.rag
+import helper.compare_cases.rag
+import helper.output_cases.rag
+import helper.edit_cases.rag
 
 from .models import (
     AgentType,
@@ -113,8 +116,15 @@ class SessionManager:
 
     def _get_rag_module(self, agent_type: str):
         """Get the appropriate RAG module for an agent type"""
-        if agent_type == "case_input":
-            return helper.rag_input_cases
+        if agent_type == AgentType.CASE_INPUT:
+            return helper.input_cases.rag
+        if agent_type == AgentType.CASE_COMPARE:
+            return helper.compare_cases.rag
+        if agent_type == AgentType.CASE_OUTPUT:
+            return helper.output_cases.rag
+        if agent_type == AgentType.CASE_EDIT:
+            return helper.edit_cases.rag
+            
         
 
     def _ensure_rag_initialized(self, agent_type: str, force: bool = False) -> dt.datetime:
@@ -136,10 +146,7 @@ class SessionManager:
 
         # Initialize RAG
         try:
-            if agent_type == "case_input":
-                rag_date = self._download_rag(agent_type, force)
-            else:  # knowledge_hub
-                rag_date = self._download_rag(agent_type, force)
+            rag_date = self._download_rag(agent_type, force)
 
             self._rag_cache[cache_key] = rag_date
             return rag_date
@@ -168,11 +175,8 @@ class SessionManager:
         rag_date_file = os.path.join(persist_directory, "rag_date.txt")
         rag_version_file = os.path.join(persist_directory, "rag_version.txt")
 
-        # Map agent types to source types for RAG naming
-        source_type_mapping = {
-            "case_input": "case_input"
-        }
-        source_type = source_type_mapping.get(agent_type, agent_type)
+        
+        source_type = agent_type
 
         # Check existing RAG version (ZIP filename)
         existing_version = None
@@ -407,7 +411,10 @@ class GatewayService:
         logger.info("Preloading RAG vectorstores for all agents...")
 
         agents_to_preload = [
-            ("case_input", ["case_input"])
+            ("case_input", ["case_input"]),
+            ("case_compare",["case_compare"]),
+            ("case_output",["case_output"]),
+            ("case_edit",["case_edit"])
         ]
 
         for agent_name, agent_types in agents_to_preload:
@@ -437,7 +444,7 @@ class GatewayService:
         else:
             # Redownload all agents
             logger.info("Force redownloading RAGs for all agents...")
-            agents = ["case_input"]
+            agents = ["case_input","case_compare", "case_output","case_edit"]
 
             for agent in agents:
                 try:
@@ -452,7 +459,10 @@ class GatewayService:
         status = {}
 
         agents_to_check = {
-            "case_input": ["case_input"]
+            "case_input": ["case_input"],
+            "case_compare": ["case_compare"],
+            "case_output": ["case_output"],
+            "case_edit": ["case_edit"]
         }
 
         for agent_name, agent_types in agents_to_check.items():

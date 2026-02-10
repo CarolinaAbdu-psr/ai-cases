@@ -8,10 +8,10 @@ from enum import Enum
 
 class AgentType(str, Enum):
     """Available agent types"""
-    FACTORY = "factory"
-    PSRIO = "psrio"
-    KNOWLEDGE_HUB = "knowledge_hub"
     CASE_INPUT = "case_input"
+    CASE_OUTPUT = "case_output"
+    CASE_COMPARE = "case_compare"
+    CASE_EDIT = "case_edit"
 
 
 class ChatRole(str, Enum):

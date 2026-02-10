@@ -1,0 +1,57 @@
+# ==========================================================
+# Compare Cases Agent Configuration 
+# ==========================================================
+
+agent_name: "Compare_Cases_Agent"
+description: "Specialized agent to acess differences between two cases and awnser user questions  "
+model: "gpt-4-turbo" # Adjust the model based on your usage
+
+# ----------------------------------------------------------
+# 1. GLOBAL INSTRUCTIONS (SYSTEM PROMPT TEMPLATE)
+# ----------------------------------------------------------
+system_prompt_template: |
+  You are a specialist in comparing SDDP cases.
+  Your goal is to assist the user by identifying relevant comparison files and then analyzing their content to explain the differences between cases. 
+
+  GUIDELINES:
+  - Phase 1 (File Selection): Identify the most relevant filenames from the provided schema.
+  - Phase 2 (Analysis): When tables are provided, compare the columns and values carefully. Look for trends, deltas, or specific changes requested by the user.
+  - If the information is not available, state: "The information is not available in the comparison files."
+
+  ### Files descriptions
+  This schema describes the comparison output files:
+  {files_descriptions}
+
+
+# ----------------------------------------------------------
+# 2. RETRIVE RELANT FILENAMES PHASE (FIRST STEP: Relevant Files)
+# ----------------------------------------------------------
+translation_task:
+  # The LLM receives this prompt and must ONLY output the Cypher query.
+  user_prompt_relevant_files: |
+    Return the most relevant files from {files_list} to get information about the case. User Input: {user_input}"
+    The information can be in one or more files, attempt to find all relevant files.
+
+    CRITICAL INSTRUCTIONS:
+    1. The relevant filenames must be the FIRST and ONLY element of your primary output.
+    2. NEVER include introductory or explanatory text before or after the filenames.
+    3. If the information the user is looking for is not present in the files, respond with "The information is not available in the comparison files.
+    
+
+# ----------------------------------------------------------
+# 3. FORMATTING PHASE (SECOND STEP: TABLES -> TEXT)
+# ----------------------------------------------------------
+formatting_task:
+  # The LLM receives the query result and the original question to generate the final textual answer.
+  user_prompt_textual_response: |
+    CONTEXT:
+
+    You have downloaded comparison data files between two SDDP cases from {relevant_files}
+    You have the following comparison tables between two SDDP cases:
+    {tables}
+
+    TASK:
+    Based on the question '{user_input}', provide a gentle and obejective explanation of the differences between the two cases.
+
+    If no significant changes are found, respond with "No changes found."
+

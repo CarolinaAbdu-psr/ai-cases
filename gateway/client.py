@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class GatewayClient:
     """Client for interacting with the AI Gateway API"""
 
-    def __init__(self, base_url: str = "http://localhost:8000", timeout: int = 120):
+    def __init__(self, base_url: str = "http://localhost:8000", timeout: int = 200):
         """
         Initialize the gateway client
 

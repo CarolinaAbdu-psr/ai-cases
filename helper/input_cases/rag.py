@@ -198,44 +198,6 @@ class RAGAgent:
         return {'messages': results}
     
 
-
-def initialize(model: str, chat_language: str, study_path, agent_type: str = "factory") -> Tuple[StateGraph, MemorySaver]:
-    """Initialize the LLM and return the compiled LangGraph workflow and memory."""
-
-    try:
-        if model == "gpt-5-2025-08-07":
-            llm = ChatOpenAI(model_name="gpt-5-2025-08-07", request_timeout=REQUEST_TIMEOUT)
-        elif model == "gpt-4.1":
-            llm = ChatOpenAI(model_name="gpt-4.1", temperature=0.7, max_tokens=MAX_TOKENS, request_timeout=REQUEST_TIMEOUT)
-        elif model == "gpt-4.1-mini":
-            llm = ChatOpenAI(model_name="gpt-4.1-mini", temperature=0.7, max_tokens=MAX_TOKENS, request_timeout=REQUEST_TIMEOUT)
-        elif model == "o3":
-            llm = ChatOpenAI(model_name="o3", request_timeout=REQUEST_TIMEOUT)
-        elif model == "claude-4-sonnet":
-            from langchain_anthropic import ChatAnthropic
-            llm = ChatAnthropic(model='claude-sonnet-4-20250514', anthropic_api_key=os.getenv('ANTHROPIC_API_KEY'), temperature=0.7, max_tokens=MAX_TOKENS, timeout=REQUEST_TIMEOUT)
-        elif model == "deepseek-reasoner":
-            llm = BaseChatOpenAI(model='deepseek-reasoner', openai_api_key=os.getenv('DEEPSEEK_API_KEY'), openai_api_base='https://api.deepseek.com', temperature=0.7, max_tokens=MAX_TOKENS, request_timeout=REQUEST_TIMEOUT)
-        elif model == "local_land":
-            llm = ChatOpenAI(model_name="qwen3:14b", temperature=0.7, max_tokens=MAX_TOKENS, request_timeout=REQUEST_TIMEOUT, base_url= "http://10.246.47.184:10000/v1")
-        else:
-            llm = ChatOpenAI(model_name="gpt-4.1", temperature=0.7, max_tokens=MAX_TOKENS, request_timeout=REQUEST_TIMEOUT)
-
-        global STUDY  
-        STUDY = psr.factory.load_study(study_path)
-
-        app, memory = create_langgraph_workflow(llm)
-        
-        return app, memory
-
-    except Exception as e:
-        logger.error(f"Error initializing RAG: {str(e)}")
-        raise
-    
-    except Exception as e:
-        logger.error(f"Error initializing RAG: {e}")
-        raise
-
 # -----------------------------
 # Retrive context
 # -----------------------------
@@ -315,11 +277,11 @@ def retrive_properties(state:AgentState)->str:
         return f"TOOL_ERROR: retrive_properties failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify vectorstore exists and the last message content is valid."
 
 @tool
-def get_available_names(object_type):
+def get_available_names(objctype):
     """Get all names (list of available instances) for a given object type in the study.
     
     Args:
-        object_type: The object type name (e.g., 'ThermalPlant', 'Bus', 'HydroPlant')
+        obcjtype: The object type name (e.g., 'ThermalPlant', 'Bus', 'HydroPlant')
         
     Returns: List of all names/identifiers for objects of this type that exist in the study.
     
@@ -791,7 +753,43 @@ def get_neighboors(type,name, max_level=1):
         tb = traceback.format_exc()
         return f"TOOL_ERROR: get_neighboors failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify type, name and max_level."
 
+def initialize(model: str, chat_language: str, study_path, agent_type: str = "factory") -> Tuple[StateGraph, MemorySaver]:
+    """Initialize the LLM and return the compiled LangGraph workflow and memory."""
 
+    try:
+        if model == "gpt-5-2025-08-07":
+            llm = ChatOpenAI(model_name="gpt-5-2025-08-07", request_timeout=REQUEST_TIMEOUT)
+        elif model == "gpt-4.1":
+            llm = ChatOpenAI(model_name="gpt-4.1", temperature=0.7, max_tokens=MAX_TOKENS, request_timeout=REQUEST_TIMEOUT)
+        elif model == "gpt-4.1-mini":
+            llm = ChatOpenAI(model_name="gpt-4.1-mini", temperature=0.7, max_tokens=MAX_TOKENS, request_timeout=REQUEST_TIMEOUT)
+        elif model == "o3":
+            llm = ChatOpenAI(model_name="o3", request_timeout=REQUEST_TIMEOUT)
+        elif model == "claude-4-sonnet":
+            from langchain_anthropic import ChatAnthropic
+            llm = ChatAnthropic(model='claude-sonnet-4-20250514', anthropic_api_key=os.getenv('ANTHROPIC_API_KEY'), temperature=0.7, max_tokens=MAX_TOKENS, timeout=REQUEST_TIMEOUT)
+        elif model == "deepseek-reasoner":
+            llm = BaseChatOpenAI(model='deepseek-reasoner', openai_api_key=os.getenv('DEEPSEEK_API_KEY'), openai_api_base='https://api.deepseek.com', temperature=0.7, max_tokens=MAX_TOKENS, request_timeout=REQUEST_TIMEOUT)
+        elif model == "local_land":
+            llm = ChatOpenAI(model_name="qwen3:14b", temperature=0.7, max_tokens=MAX_TOKENS, request_timeout=REQUEST_TIMEOUT, base_url= "http://10.246.47.184:10000/v1")
+        else:
+            llm = ChatOpenAI(model_name="gpt-4.1", temperature=0.7, max_tokens=MAX_TOKENS, request_timeout=REQUEST_TIMEOUT)
+
+        global STUDY  
+        STUDY = psr.factory.load_study(study_path)
+
+        app, memory = create_langgraph_workflow(llm)
+        
+        return app, memory
+
+    except Exception as e:
+        logger.error(f"Error initializing RAG: {str(e)}")
+        raise
+    
+    except Exception as e:
+        logger.error(f"Error initializing RAG: {e}")
+        raise
+    
 def create_langgraph_workflow(llm: BaseChatOpenAI):
 
     tools = [retrive_properties, get_available_names, get_all_objects, find_by_name, get_static_property, get_dynamic_property,
