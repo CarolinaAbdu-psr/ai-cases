@@ -336,7 +336,7 @@ def get_all_objects():
         return f"TOOL_ERROR: get_all_objects failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: ensure STUDY is loaded and accessible."
 
 @tool
-def find_by_name(objtype, name):
+def get_object_summary(objtype, name): #EDITAR ESSA FUNÇÃO QUANDO TIVER UNIQUE_ID
     """Find a specific object by its exact name/identifier.
     
     Args:
@@ -351,12 +351,13 @@ def find_by_name(objtype, name):
     - Validate if an object exists in the study
     """
     try:
-        obj = STUDY.find_by_name(objtype,name)
-        description = f"Object Type: {objtype}, Name: {name}, Static Properties and References: {obj[0].as_dict() if obj else 'Not Found'}"
-        return STUDY.find_by_name(objtype,name)
+        obj = STUDY.find_by_name(objtype,name)[0]
+        description = f"Object Type: {objtype}, Name: {obj.name.strip()}, Static Properties and References: {obj.as_dict() if obj else 'Not Found'}"
+        return description
     except Exception as e:
         tb = traceback.format_exc()
-        return f"TOOL_ERROR: find_by_name failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify object type and exact name."
+        return f"TOOL_ERROR: get_object_summary failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify object type and exact name."
+
 
 @tool
 def get_static_property(type, property_name, object_name):

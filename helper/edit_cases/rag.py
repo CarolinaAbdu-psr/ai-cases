@@ -334,8 +334,7 @@ def modify_element(object_type,code,name, property, value):
             obj= STUDY.find_by_name(object_type,name)[0]
         
         if obj:
-            if not is_dataframe(obj,property):
-                obj.set(property,value) 
+            obj.set(property,value) 
         
         return True
 
