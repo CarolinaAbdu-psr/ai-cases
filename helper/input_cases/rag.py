@@ -277,24 +277,30 @@ def retrive_properties(state:AgentState)->str:
         return f"TOOL_ERROR: retrive_properties failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify vectorstore exists and the last message content is valid."
 
 @tool
-def get_available_names(objctype):
+def get_available_objects(obj_type:str):
     """Get all names (list of available instances) for a given object type in the study.
     
     Args:
-        obcjtype: The object type name (e.g., 'ThermalPlant', 'Bus', 'HydroPlant')
+        obj_type: The object type name (e.g., 'ThermalPlant', 'Bus', 'HydroPlant')
         
-    Returns: List of all names/identifiers for objects of this type that exist in the study.
+    Returns: String with description followed by dictionary mapping object keys to names.
     
     Use this to:
-    - Find exact names to use in find_by_name() tool
+    - Find exact keys to use in get_object_summary() tool
     - See what instances exist before filtering by properties
     - Match user-provided names with actual study objects
     """
     try:
-        names =[]
-        for obj in STUDY.find(objctype):
-            names.append(obj.name)
-        return names
+        description = f"Dict with key : name for all {obj_type} objects: "
+        name_id_map = {}
+        for obj in STUDY.find(obj_type):
+            name = ''
+            if obj.has_name:
+                name = obj.name.strip()
+            name_id_map[obj.key] = name
+        
+        return description + str(name_id_map)
+
     except Exception as e:
         tb = traceback.format_exc()
         return f"TOOL_ERROR: get_available_names failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify object type name and that STUDY is loaded."
@@ -323,26 +329,24 @@ def count_objects_by_type(object_type):
 def get_all_objects():
     """Get all objects with its types, codes and names
     
-    Returns: A list with all objects and its names 
+    Returns: A dict with object key and obj
     
     Use this to: 
     - Find easy the names of more thant one object to use in other functions that the exact name is required
     - Give a summary of the case and it's objets"""
 
     try:
-        return STUDY.get_all_objects()
+        return STUDY.get_key_object_map()
     except Exception as e:
         tb = traceback.format_exc()
         return f"TOOL_ERROR: get_all_objects failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: ensure STUDY is loaded and accessible."
 
 @tool
-def get_object_summary(objtype, name): #EDITAR ESSA FUNÇÃO QUANDO TIVER UNIQUE_ID
+def get_object_summary(obj_key):
     """Find a specific object by its exact name/identifier.
     
     Args:
-        objtype: The object type name (e.g., 'ThermalPlant', 'Bus')
-        name: The exact name of the object to find
-        
+        obj_key: The object key
     Returns: The object matching the name, or empty result if not found.
     
     Use this to:
@@ -351,24 +355,22 @@ def get_object_summary(objtype, name): #EDITAR ESSA FUNÇÃO QUANDO TIVER UNIQUE
     - Validate if an object exists in the study
     """
     try:
-        obj = STUDY.find_by_name(objtype,name)[0]
-        description = f"Object Type: {objtype}, Name: {obj.name.strip()}, Static Properties and References: {obj.as_dict() if obj else 'Not Found'}"
+        obj = STUDY.get_by_key(obj_key)
+        description = f"Object Type: {obj.type}, Static Properties and References: {obj.as_dict() if obj else 'Not Found'}"
         return description
     except Exception as e:
         tb = traceback.format_exc()
         return f"TOOL_ERROR: get_object_summary failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify object type and exact name."
 
-
 @tool
-def get_static_property(type, property_name, object_name):
-    """Get the value of a static property for a specific object or all objects of a type.
+def get_static_properties(obj_key, properties_names:list):
+    """Get the values of static properties for a specific object.
     
     Args:
-        type: Object type (e.g., 'ThermalPlant', 'Bus', 'HydroPlant')
-        property_name: The static property name (e.g., 'InstalledCapacity', 'Voltage')
-        object_name: Specific object name to retrieve, or empty string to get all objects
+        obj_key: Object key (e.g., 'Thermal Plant Thermal 1 [1]')
+        properties_names: List of static property names to retrieve (e.g., ['InstalledCapacity', 'Voltage'])
         
-    Returns: Dictionary of {object_name: property_value} pairs.
+    Returns: Dictionary of {property_name: property_value} pairs.
     
     Use this to:
     - Retrieve specific properties of named objects (e.g., capacity of 'Plant_A')
@@ -378,45 +380,41 @@ def get_static_property(type, property_name, object_name):
     Tip: Use retrive_properties first to find valid property names for your object type.
     """
     try:
-        objs = STUDY.find_by_name(type,object_name)
-        properties = {}
-        if len(objs) == 0 :
-            objs = STUDY.find(type)
-            for obj in objs: 
-                properties[obj.name] = obj.get(property_name)
-        else:
-            obj = objs[0]
-            properties[obj.name] = obj.get(property_name)
+        obj = STUDY.get_by_key(obj_key)
+        result = {}
+        if obj:
+            for property in properties_names:
+                result[property] = obj.get(property)
 
-        return properties
+        return result
     except Exception as e:
         tb = traceback.format_exc()
-        return f"TOOL_ERROR: get_static_property failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify type, property_name and object_name."
+        return f"TOOL_ERROR: get_static_properties failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify type, property_name and object_name."
     
 @tool
-def get_dynamic_property(type, property_name, object_name):
-    """Get the value of a dynamic property for a specific object or all objects of a type.
+def get_dynamic_property(obj_key, property_name):
+    """Get the value of a dynamic property (time-series data) for a specific object.
     
     Args:
-        type: Object type (e.g., 'ThermalPlant', 'Bus', 'HydroPlant')
-        property_name: The static property name (e.g., 'EnergyPerBlock')
-        object_name: Specific object name to retrieve
+        obj_key: Object key (e.g., 'Thermal Plant Thermal 1 [1]')
+        property_name: The dynamic property name (e.g., 'EnergyPerBlock', 'Demand')
         
-    Returns: Dataframe 
+    Returns: DataFrame with dynamic property values as a string
     
     Use this to:
-    - Retrieve specific properties of named objects (e.g., 'EnergyPerBlock)
-    - Use this to get the Demand information (demand_segment, EnergyPerBlock)
+    - Retrieve dynamic (time-series) properties of objects
+    - Get demand information (demand_segment, EnergyPerBlock)
+    - Access time-series data for objects
     
-    Tip: Use retrive_properties first to find valid property names for your object type.
+    Tip: Use retrive_properties first to find valid dynamic property names for your object type.
     """
     try:
-        obj = STUDY.find_by_name(type,object_name)[0]
+        obj = STUDY.get_by_key(obj_key)
         df = str(obj.get_df(property_name))
         return df
     except Exception as e:
         tb = traceback.format_exc()
-        return f"TOOL_ERROR: get_static_property failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify type, property_name and object_name."
+        return f"TOOL_ERROR: get_dynamic_property failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify obj_key and property_name are valid."
 
 @tool
 def find_by_property_condition(type, property_name, property_condition, condition_value):
@@ -653,33 +651,6 @@ def sum_property_by_reference(type, reference_type, reference_name, property):
         tb = traceback.format_exc()
         return f"TOOL_ERROR: sum_property_by_reference failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify reference and property names and that property values are numeric."
 
-@tool
-def summarize_object(type,name): 
-    """Get a dict with all properties of on given object 
-    
-    Args:
-        type: Object type to be searched (e.g., 'ThermalPlant', 'Generator')
-        name: The exact name of the object to find
-        
-    Returns: Dict with properties, values pairs
-    
-    Use this to:
-    - Get more than one information about a unique object 
-    
-    Example: What is the latitude and longitude of my system 1 ?
-    → type='System', name = 'System 1'
-    """
-    try:
-        objs = STUDY.find_by_name(type, name)
-        if not objs:
-            return f"TOOL_ERROR: summarize_object: object not found for type={type}, name={name}."
-        obj = objs[0]
-        info = obj.as_dict()
-        return info
-    except Exception as e:
-        tb = traceback.format_exc()
-        return f"TOOL_ERROR: summarize_object failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify type and name."
-
 
 def get_conections(obj, next_level_objs): 
 
@@ -695,13 +666,13 @@ def get_conections(obj, next_level_objs):
         description = obj.description(property)
         if description: 
             if description.is_reference():
-                if isinstance(obj_dict[property],list): 
-                    for item in obj_dict[property]:
+                if isinstance(obj.get(property),list): 
+                    for item in obj.get(property):
                         triple = f"({str(obj)[22:]},->,{str(item)[22:]})\n"
                         next_level_objs.append(item)
                         connections += triple
-                elif obj_dict[property]: 
-                    item = obj_dict[property]
+                elif obj.get(property): 
+                    item = obj.get(property)
                     triple = f"({str(obj)[22:]}, -> ,{str(item)[22:]})\n"
                     next_level_objs.append(item)
                     connections += triple
@@ -709,13 +680,12 @@ def get_conections(obj, next_level_objs):
     return connections, next_level_objs
 
 @tool
-def get_neighboors(type,name, max_level=1):
+def get_neighboors(obj_key, max_level=1):
     """
     Inspect neighborhood (references) for a study object and return relation triples.
 
     Args:
-        type: Object type name (e.g., 'ThermalPlant', 'Bus', 'System').
-        name: Exact object instance name to inspect.
+        obj_key: Object key to inspect (e.g., 'ThermalPlant Thermal 1 [1]').
         max_level: Depth of traversal for neighbours (default is 1).
 
     Returns:
@@ -725,18 +695,17 @@ def get_neighboors(type,name, max_level=1):
 
     Usage:
     - Use this tool to explore relationships around a given object 
-    - Use to find all related objects around a given objects
-    - Use to descover to which system a element belongs 
-    - Example: get_neighboors('ThermalPlant', 'Plant_A', max_level=1)
+    - Find all related objects connected to a given object
+    - Discover which system an element belongs to
+    - Example: get_neighboors with obj_key='ThermalPlant Thermal 1 [1]', max_level=1
     """
 
     try:
         level = 0 
         connections = ""
-        objs = STUDY.find_by_name(type,name)
-        if not objs:
-            return f"TOOL_ERROR: get_neighboors: object not found for type={type}, name={name}."
-        obj = objs[0]
+        obj = STUDY.get_by_key(obj_key)
+        if not obj:
+            return f"TOOL_ERROR: get_neighboors: object not found for key={obj_key}."
         level_objs =[obj]
         next_level_objs = []
 
@@ -752,7 +721,7 @@ def get_neighboors(type,name, max_level=1):
         return connections
     except Exception as e:
         tb = traceback.format_exc()
-        return f"TOOL_ERROR: get_neighboors failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify type, name and max_level."
+        return f"TOOL_ERROR: get_neighboors failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify obj_key and max_level."
 
 def initialize(model: str, chat_language: str, study_path, agent_type: str = "factory") -> Tuple[StateGraph, MemorySaver]:
     """Initialize the LLM and return the compiled LangGraph workflow and memory."""
@@ -793,9 +762,9 @@ def initialize(model: str, chat_language: str, study_path, agent_type: str = "fa
     
 def create_langgraph_workflow(llm: BaseChatOpenAI):
 
-    tools = [retrive_properties, get_available_names, get_all_objects, find_by_name, get_static_property, get_dynamic_property,
+    tools = [retrive_properties, get_available_objects, get_all_objects,get_object_summary, get_static_properties, get_dynamic_property,
             find_by_property_condition, count_by_property_condition, sum_by_property_condition,
-            find_by_reference, count_by_reference, count_objects_by_type, sum_property_by_reference,get_neighboors,summarize_object]
+            find_by_reference, count_by_reference, count_objects_by_type, sum_property_by_reference,get_neighboors]
     
     # Create agent with system prompt (as string, not list)
     agent = RAGAgent(llm, tools, SYSTEM_PROMPT_TEMPLATE)

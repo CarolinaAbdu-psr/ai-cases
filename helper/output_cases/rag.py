@@ -363,14 +363,18 @@ def change_output_availability(outputs:dict[int,bool]):
                                    True to enable, False to disable.
 
     Returns:
-        pandas.DataFrame: Updated outputs table with modified availability flags.
+        dict: Updated outputs dict with output name and boolean value (True = enabled or  False = disabled) .
     """
     try: 
         df_out = psr.outputs.load(CASE_PATH)
+        result = {}
         for num, action in outputs.items():
             num = float(num)
-            df_out.loc[df_out['Num'] == num, 'Active'] = action
-        return df_out
+            filter = df_out['Num'] == num
+            df_out.loc[filter, 'Active'] = action
+            result.update(df_out.loc[filter, 'Active'].to_dict())
+        psr.outputs.save(df_out,case_path=CASE_PATH)
+        return result
     except Exception as e:
         tb = traceback.format_exc()
         logger.error(f"TOOL_ERROR: change_output_availability failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: confirm that the provided output IDs are valid by calling get_output_num first.")
