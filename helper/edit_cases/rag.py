@@ -280,24 +280,29 @@ def retrive_properties(state:AgentState)->str:
         return f"TOOL_ERROR: retrive_properties failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify vectorstore exists and the last message content is valid."
 
 @tool
-def get_available_names(objctype):
+def get_available_objects(obj_type):
     """Get all names (list of available instances) for a given object type in the study.
     
     Args:
-        obcjtype: The object type name (e.g., 'ThermalPlant', 'Bus', 'HydroPlant')
+        obj_type: The object type name (e.g., 'ThermalPlant', 'Bus', 'HydroPlant')
         
-    Returns: List of all names/identifiers for objects of this type that exist in the study.
+    Returns: String with description followed by dictionary mapping object keys to names.
     
     Use this to:
-    - Find exact names to use in find_by_name() tool
     - See what instances exist before filtering by properties
     - Match user-provided names with actual study objects
     """
     try:
-        names =[]
-        for obj in STUDY.find(objctype):
-            names.append(obj.name)
-        return names
+        description = f"Dict with key : name for all {obj_type} objects: "
+        name_id_map = {}
+        for obj in STUDY.find(obj_type):
+            name = ''
+            if obj.has_name:
+                name = obj.name.strip()
+            name_id_map[obj.key] = name
+        
+        return description + str(name_id_map)
+
     except Exception as e:
         tb = traceback.format_exc()
         return f"TOOL_ERROR: get_available_names failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify object type name and that STUDY is loaded."
@@ -312,7 +317,7 @@ def is_dataframe(obj,key):
     return False
 
 @tool
-def modify_element(object_type,code,name, property, value):
+def modify_element(obj_key, property, value):
     """Edit a given property of an object (don't use to change name, code or id)
     
     Args:
@@ -328,22 +333,18 @@ def modify_element(object_type,code,name, property, value):
     - Count the objects of a given type
     """
     try:
-        if code:
-            obj= STUDY.find_by_code(object_type,code)[0]
-        elif name: 
-            obj= STUDY.find_by_name(object_type,name)[0]
-        
+        obj = STUDY.get_by_key(obj_key)
         if obj:
+            older_value = obj.get(property)
             obj.set(property,value) 
         
-        return True
-
+        return f"Object {obj} property {property} updated from {older_value} to {value}"
     except Exception as e:
         tb = traceback.format_exc()
-        return f"TOOL_ERROR: count_objects_by_type failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify object type and STUDY."
+        return f"TOOL_ERROR: modify_element failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify object type and STUDY."
 
 @tool   
-def rename_element(object_type,code,name, new_name: str):
+def rename_element(obj_key, new_name: str):
     """Modify the name of a object
     
     Args:
@@ -358,22 +359,21 @@ def rename_element(object_type,code,name, new_name: str):
     - Count the objects of a given type
     """
     try:
-        if code:
-            obj= STUDY.find_by_code(object_type,code)[0]
-        elif name: 
-            obj= STUDY.find_by_name(object_type,name)[0]
-        
-        if obj:
+        obj = STUDY.get_by_key(obj_key)
+        if obj.has_name:
+            older_name = obj.name.strip()
             obj.name = new_name
         
-        return True
+            return f"Object {obj} name updated from {older_name} to {new_name}"
+        else: 
+            return f"Object {obj} has no name property"
 
     except Exception as e:
         tb = traceback.format_exc()
         return f"TOOL_ERROR: count_objects_by_type failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify object type and STUDY."
     
 @tool   
-def modify_element_code(object_type,code,name, new_code: int):
+def modify_element_code(obj_key, new_code: int):
     """Modify the code of a object
     
     Args:
@@ -388,15 +388,39 @@ def modify_element_code(object_type,code,name, new_code: int):
     - Count the objects of a given type
     """
     try:
-        if code:
-            obj= STUDY.find_by_code(object_type,code)[0]
-        elif name: 
-            obj= STUDY.find_by_name(object_type,name)[0]
-        
-        if obj and isinstance(new_code,int):
+        obj = STUDY.get_by_key(obj_key)
+        if obj.has_id:
+            older_code = obj.code
             obj.code = new_code
         
-        return True
+            return f"Object {obj} name updated from {older_code} to {new_code}"
+        else: 
+            return f"Object {obj} has no code property"
+
+    except Exception as e:
+        tb = traceback.format_exc()
+        return f"TOOL_ERROR: count_objects_by_type failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify object type and STUDY."
+
+@tool   
+def modify_element_key(obj_key, new_key: str):
+    """Modify the code of a object
+    
+    Args:
+        object_type: The object type name (e.g., 'ThermalPlant', 'Bus', 'HydroPlant')
+        code: the code of the object (can be None since the name is not none)
+        name: the name of the given object (can be none since code is not none)
+        new_code : the new code desired (int)
+        
+    Returns: Ture if succed
+    
+    Use this to:
+    - Count the objects of a given type
+    """
+    try:
+        obj = STUDY.get_by_key(obj_key)
+        obj.key = new_key
+        return f"Object {obj} name updated from {obj_key} to {new_key}"
+       
 
     except Exception as e:
         tb = traceback.format_exc()
@@ -414,11 +438,29 @@ def get_all_objects():
     - Give a summary of the case and it's objets"""
 
     try:
-        return STUDY.get_all_objects()
+        return STUDY.get_key_object_map()
     except Exception as e:
         tb = traceback.format_exc()
         return f"TOOL_ERROR: get_all_objects failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: ensure STUDY is loaded and accessible."
 
+
+
+@tool 
+def create_modification(obj_key,property:str, modifications: dict):
+    try: 
+        obj = STUDY.get_by_key(obj_key)
+        description = obj.description(property)
+        if description.is_dynamic(): 
+            for date,value  in modifications.items():
+                obj.set_at(property,date,value)
+
+            return f"Add modifications to property {property}: {modifications}"
+
+        else: 
+            return f"Property {property} does not change over time, it is a static value."
+    except Exception as e:
+        tb = traceback.format_exc()
+        return f"TOOL_ERROR: get_all_objects failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: ensure STUDY is loaded and accessible."
 
 
 def initialize(model: str, chat_language: str, study_path, agent_type: str = "factory") -> Tuple[StateGraph, MemorySaver]:
