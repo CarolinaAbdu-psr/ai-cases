@@ -178,13 +178,24 @@ def load_vectorstore() -> Chroma:
 
 
 @tool 
-def list_available_outputs():
-    """List all available outputs from the study case.
-    
-    Retrieves a dictionary of available output files with their descriptions.
-    
+def list_enabled_outputs():
+    """
+    List all currently enabled outputs in the study case.
+
+    This tool returns a dictionary containing only the outputs that are currently
+    enabled (active) in the study, mapping each output filename to its description.
+
+    This function should be used when:
+        - The user asks which outputs are currently active or available.
+        - The agent needs to inspect which outputs can be accessed or converted.
+        - As a validation step before calling `convert_output`.
+
+    Usage:
+        - Call this function to retrieve the list of enabled outputs.
+        - If file paths are required, use `list_enabled_outputs_paths` instead.
+
     Returns:
-        dict: A dictionary mapping output filenames to their descriptions.
+        dict[str, str]: A dictionary mapping output filenames to their descriptions.
     """
     try: 
         case_path = CASE_PATH
@@ -195,18 +206,30 @@ def list_available_outputs():
         return outputs
     except Exception as e:
         tb = traceback.format_exc()
-        return f"TOOL_ERROR: list_available_outputs  failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\n."
+        logger.error(f"TOOL_ERROR: list_enabled_outputs  failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\n.")
+        return f"TOOL_ERROR: list_enabled_outputs  failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\n."
+
 
     
 
 @tool 
-def list_available_outputs_paths():
-    """List all available output file paths from the study case.
-    
-    Retrieves a dictionary of available output file paths with their descriptions.
-    
+def list_enabled_outputs_paths():
+    """
+    List full file paths of all currently enabled outputs in the study case.
+
+    This tool returns a dictionary mapping each enabled output's absolute file path
+    to its description.
+
+    This function should be used when:
+        - The agent needs the physical file path for reading, converting or exporting outputs.
+        - Before calling `convert_output`, to validate valid input paths.
+
+    Usage:
+        - Call this function to retrieve all enabled output paths.
+        - Select the desired file path and pass it to `convert_output`.
+
     Returns:
-        dict: A dictionary mapping full file paths to their descriptions.
+        dict[str, str]: A dictionary mapping full file paths to output descriptions.
     """
     try:
         case_path = CASE_PATH
@@ -220,22 +243,41 @@ def list_available_outputs_paths():
         return paths
     except Exception as e:
         tb = traceback.format_exc()
-        return f"TOOL_ERROR: list_available_outputs_paths: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\n."
-
+        logger.error(f"TOOL_ERROR: list_enabled_outputs_paths: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\n.")
+        return f"TOOL_ERROR: list_enabled_outputs_paths: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\n."
 
 
 @tool
 def convert_output(file_path, format):
-    """Convert an output file to a different format.
-    
-    Converts the specified output file to the requested file format.
-    
+    """
+    Convert an enabled output file to a different format.
+
+    This tool converts an existing output file into another format such as CSV,
+    bin, hdr. The input file must exist and must correspond to an enabled
+    output from the study.
+
+    This function should be used after:
+        - Calling `list_enabled_outputs_paths` to obtain valid file paths.
+
+    Usage:
+        - Call list_enabled_outputs_paths().
+        - Select the desired file path.
+        - Call convert_output(file_path, target_format).
+        - Supported target-formats:  'binpair': PSR binary format split in two files: header (hdr) and data (bin), 'singlebin' : PSR binary format in a single file (dat),
+        'csv'
+
+    Example:
+        convert_output(
+            "C:/study/case/outputs/gerter.dat",
+            "csv"
+        )
+
     Args:
-        file_path (str): The path to the output file to convert.
-        format (str): The target file format (e.g., 'csv', 'json', 'xlsx').
-    
+        file_path (str): Full path of the output file to be converted.
+        format (str): Target format (e.g., 'csv', 'binpair', 'singlebin').
+
     Returns:
-        bool: True if conversion was successful.
+        str: Confirmation message indicating successful conversion.
     """
     try: 
         p = Path(file_path)
@@ -247,6 +289,92 @@ def convert_output(file_path, format):
         logger.error(f"TOOL_ERROR: convert_output failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify with the filepath exist. Call list_available_outputs_paths first.")
         return f"TOOL_ERROR: convert_output failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify with the filepath exist. Call list_available_outputs_paths first."
 
+@tool
+def get_output_num():
+    """
+    Retrieve all available outputs and their descriptions.
+
+    This tool returns a dictionary mapping each output ID (Num) to its textual
+    description. It must be used as an intermediate step to interpret the user's
+    query and identify which outputs should be enabled or disabled.
+
+    Usage:
+        - Call this function to obtain all (id → description) pairs.
+        - Compare the user query semantically against the descriptions.
+        - Select the output IDs whose descriptions best match the user request.
+        - Pass the selected IDs to `change_output_availability`.
+
+    Typical examples:
+        - User: "Enable marginal cost outputs"
+          → Match query with descriptions, find corresponding Num values,
+            then call change_output_availability.
+
+        - User: "Disable hydro generation reports"
+          → Identify matching descriptions and extract their Num.
+
+    Returns:
+        dict[int, str]: A dictionary mapping output ID (Num) to output description.
+    """
+    try:
+        case_path = CASE_PATH
+        df = psr.outputs.load_index_dat(case_path)
+        d = df.set_index('Num')['Description'].to_dict()
+        return str(d)
+    except Exception as e:
+        tb = traceback.format_exc()
+        logger.error(f"TOOL_ERROR: get_output_num failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\n")
+        return f"TOOL_ERROR: get_output_num failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\n"
+
+
+def change_output_availability(outputs:dict[int,bool]):
+    """
+    Enable or disable study outputs based on their IDs.
+
+    This tool updates the availability status of one or more outputs in the study.
+    The input must be a dictionary mapping output IDs (Num) to boolean values,
+    where:
+
+        - True  → enable the output
+        - False → disable the output
+
+    This function must always be called after identifying the correct output IDs
+    using `get_output_num`, by matching the user query against the output
+    descriptions.
+
+    Usage:
+        - First, call `get_output_num()` to retrieve all (id → description) pairs.
+        - Determine which outputs match the user's request.
+        - Build a dictionary {Num: action}.
+        - Call this function to apply the changes.
+
+    Example:
+        User: "Disable thermal generation and deficit outputs"
+
+        Step 1: Call get_output_num()
+        Step 2: Identify matching IDs, e.g. {3, 7}
+        Step 3: Call:
+            change_output_availability({
+                3: False,
+                7: False
+            })
+
+    Args:
+        outputs (dict[int, bool]): Dictionary mapping output ID (Num) to action:
+                                   True to enable, False to disable.
+
+    Returns:
+        pandas.DataFrame: Updated outputs table with modified availability flags.
+    """
+    try: 
+        df_out = psr.outputs.load(CASE_PATH)
+        for num, action in outputs.items():
+            num = float(num)
+            df_out.loc[df_out['Num'] == num, 'Active'] = action
+        return df_out
+    except Exception as e:
+        tb = traceback.format_exc()
+        logger.error(f"TOOL_ERROR: change_output_availability failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: confirm that the provided output IDs are valid by calling get_output_num first.")
+        return f"TOOL_ERROR: change_output_availability failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: confirm that the provided output IDs are valid by calling get_output_num first."
 
     
 # -------------------------------------------------------
@@ -256,7 +384,7 @@ def convert_output(file_path, format):
 
 def create_langgraph_workflow(llm: BaseChatOpenAI):
 
-    tools = [list_available_outputs,list_available_outputs_paths,convert_output]
+    tools = [list_enabled_outputs,list_enabled_outputs_paths,convert_output, get_output_num]
     
     # Create agent with system prompt (as string, not list)
     agent = RAGAgent(llm, tools, SYSTEM_PROMPT_TEMPLATE)
