@@ -358,6 +358,7 @@ def rename_element(obj_key, new_name: str):
     Use this to:
     - Count the objects of a given type
     """
+    
     try:
         obj = STUDY.get_by_key(obj_key)
         if obj.has_name:
@@ -447,6 +448,37 @@ def get_all_objects():
 
 @tool 
 def create_modification(obj_key,property:str, modifications: dict):
+    """
+    Create or update future modifications for study objects.
+
+    This tool defines changes to object attributes that will become effective
+    in future stages or time periods of the study.
+
+    It should be used whenever the user requests modifications such as:
+        - Adding new attributes that currently do not exist.
+        - Changing parameter values in the future.
+        - Defining time-dependent behavior for any object.
+
+    Typical examples:
+        - "In the future, plant A will have a capacity factor of 0.6"
+        - "From 2028 onwards, this unit becomes unavailable"
+        - "Set fuel cost to 120 starting next year"
+
+    Usage:
+        - Identify the target object.
+        - Determine the attribute to be modified.
+        - Define the new value.
+        - Define when the modification becomes active.
+        - Call this function to register the modification.
+
+    Important:
+        - If the attribute does not currently exist, this tool will create it.
+        - If the attribute already exists, this tool will overwrite its value
+          for the specified time interval.
+
+    Returns:
+        bool: True if the modification was successfully created or updated.
+    """
     try: 
         obj = STUDY.get_by_key(obj_key)
         description = obj.description(property)
@@ -502,7 +534,8 @@ def initialize(model: str, chat_language: str, study_path, agent_type: str = "fa
     
 def create_langgraph_workflow(llm: BaseChatOpenAI):
 
-    tools = [retrive_properties, get_available_names, get_all_objects,modify_element,rename_element]
+    tools = [retrive_properties, get_available_objects, get_all_objects,modify_element,rename_element,modify_element_code,
+            modify_element_key, create_modification]
     
     # Create agent with system prompt (as string, not list)
     agent = RAGAgent(llm, tools, SYSTEM_PROMPT_TEMPLATE)

@@ -1,11 +1,10 @@
-import argparse
 import yaml
-import datetime as dt
 import os
 import re
 import pandas as pd
 from dotenv import load_dotenv
 from typing import Tuple, List, Annotated, Dict, Any
+from pathlib import Path 
 
 import logging
 
@@ -36,8 +35,8 @@ MAX_TOKENS = 4096
 AGENTS_DIR = "agents"
 COMPARE_AGENT_FILENAME = "case_compare_agent.yaml"
 
-STUDY_PATH_A = r"C:\PSR\SDDP18.0\examples\operation\1_stage\Case01"
-STUDY_PATH_B = r"C:\PSR\SDDP18.0\examples\operation\1_stage\Case02"
+STUDY_PATH_A = r"C:\PSR\SDDP18.1Beta\examples\operation\1_stage\Case01"
+STUDY_PATH_B = r"C:\PSR\SDDP18.1Beta\examples\operation\1_stage\Case01-edited"
 
 # -----------------------------
 # Load agent configuration
@@ -101,14 +100,16 @@ def create_files(study_path_a: str, study_path_b:str):
 
 def list_files(state:GraphState) -> str:
     """List all files in the specified output directory."""
-    output_dir="comparison_results"
+    BASE_DIR = Path(__file__).resolve().parent
+    output_dir = BASE_DIR / "comparison_results" 
+    logger.info("Compainson Output dir")
     files = []
     if os.path.exists(output_dir) and os.path.isdir(output_dir):
         for item in os.listdir(output_dir):
             item_path = os.path.join(output_dir, item)
             files.append(item_path)
 
-    print("FILES AVAILABLE", files)
+    logger.info("FILES AVAILABLE", files)
     return {"files_list" : files}
 
 
@@ -138,6 +139,8 @@ def parse_relevant_filenames(response):
         # Remove potential quotes around filenames (e.g., "case1.dat")
         if clean_name.lower().endswith('.csv'):
             filenames.append(clean_name)
+        
+        logger.info("Filenames available",filenames)
 
     return filenames
 

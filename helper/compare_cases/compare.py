@@ -4,9 +4,9 @@ import psr.factory
 import pandas as pd
 import os 
 import shutil
-import argparse
 import sys
 import logging
+from pathlib import Path
 
 
 
@@ -176,23 +176,22 @@ def compare_study_object(obj_source,obj_target,dataframes):
     # Get all properties of obj_source
     for key in obj_source.descriptions().keys():
 
-        # Define object type, code, and name, with exeception for study object
-        type = "Study Object"
+        try:
+            # Define object type, code, and name, with exeception for study object
+            type = "Study Object"
 
-        #Compare if the properties are equal (static and dynamic)
-        description = obj_target.description(key)
+            #Compare if the properties are equal (static and dynamic)
+            description = obj_target.description(key)
 
-        if description is not None: 
-            try: 
-                df = is_dataframe(obj_target,key)
-            except:
-                continue
-            
-            if not  df: 
-                dataframes = compare_static_values(obj_source, obj_target, key, dataframes)
+            if description is not None: 
+                if not  is_dataframe(obj_target,key): 
+                    dataframes = compare_static_values(obj_source, obj_target, key, dataframes)
 
-            else: 
-                dataframes = compare_dynamic_values(obj_source, obj_target, key, dataframes)
+                else: 
+                    dataframes = compare_dynamic_values(obj_source, obj_target, key, dataframes)
+        except Exception as e:
+            logger.exception("Error comparing study object property %s: %s", key, e)
+            continue
 
     return dataframes
 
@@ -201,51 +200,51 @@ def compare_objects(obj_source, obj_target, dataframes):
 
     # Get all properties of obj_source
     for key in obj_source.descriptions().keys():
-
-        if key == "ReserveOfMaxSecondaryPerReserve":
-            continue
-
-        # Define object type and obj_key, with exeception for study object
         try:
-            type = obj_source.type 
-            obj_key = obj_source.key
-        except:
-            type = "Study Object"
-            obj_key = obj_source.key
-        
-        if obj_source.description(key).is_reference() and key.startswith("Ref") and type!= "Study Object": 
-
-            # Normalize objects to always be a list 
-            ref_list_source = normalize_references(obj_source, key)
-            ref_list_target = normalize_references(obj_target, key)
-
-            # If reference is empty 
-            if not ref_list_source and not ref_list_target:
-                continue
-                
-            # Call compare_references function to check if the objects are the same
-            match = compare_references(ref_list_source, ref_list_target)
-
-            # If refences objects are not the same, add modification on dataframe
-            if not match: 
-                logger.info("Different references found for %s obj_key%s key=%s", type, obj_key, key)
-                dataframes = add_to_dataframe(type, obj_key, "M", key, "",ref_list_source, ref_list_target, dataframes)
-            continue 
-
-        #Compare if the other properties are equal (static and dynamic)
-        description = obj_target.description(key)
-        if description is not None: 
-
-            try: 
-                df = is_dataframe(obj_target,key)
+            # Define object type and obj_key, with exeception for study object
+            try:
+                type = obj_source.type 
+                obj_key = obj_source.key
             except:
-                continue
+                type = "Study Object"
+                obj_key = obj_source.key
+            
+            if obj_source.description(key).is_reference() and key.startswith("Ref") and type!= "Study Object": 
 
-            if not df: 
-                dataframes = compare_static_values(obj_source, obj_target, key, dataframes)
+                # Normalize objects to always be a list 
+                ref_list_source = normalize_references(obj_source, key)
+                ref_list_target = normalize_references(obj_target, key)
 
-            else: 
-                dataframes = compare_dynamic_values(obj_source, obj_target, key, dataframes)
+                # If reference is empty 
+                if not ref_list_source and not ref_list_target:
+                    continue
+                    
+                # Call compare_references function to check if the objects are the same
+                match = compare_references(ref_list_source, ref_list_target)
+
+                # If refences objects are not the same, add modification on dataframe
+                if not match: 
+                    logger.info("Different references found for %s obj_key%s key=%s", type, obj_key, key)
+                    dataframes = add_to_dataframe(type, obj_key, "M", key, "",ref_list_source, ref_list_target, dataframes)
+                continue 
+
+            #Compare if the other properties are equal (static and dynamic)
+            description = obj_target.description(key)
+            
+            if description is not None: 
+                if not is_dataframe(obj_target,key): 
+                    dataframes = compare_static_values(obj_source, obj_target, key, dataframes)
+
+                else: 
+                    dataframes = compare_dynamic_values(obj_source, obj_target, key, dataframes)
+        except Exception as e:
+            # Log the error but continue with next property
+            try:
+                logger.exception("Error comparing object %s key %s: %s", obj_key if 'obj_key' in locals() else 'Unknown', key, e)
+            except Exception:
+                # Fallback simple log
+                logger.error("Error comparing object property: %s", e)
+            continue
 
     return dataframes
 
@@ -257,37 +256,44 @@ def compare_studies(study_a, study_b, dataframes={}):
     all_objects=study_a.get_all_objects()
     study_b_visited_objects  =[]
     for obj in all_objects:
-        
         try:
-            type = obj.type 
-            obj_key = obj.key 
-        except:
-            type = "Study Object"
-            obj_key = obj.key 
-        
-        #Get correspondet in study B 
-        obj_b = study_b.get_by_key(obj_key)
-      
-        #No correspontet object in study B
-        if not obj_b:  
-            dataframes= add_to_dataframe(type, obj_key, "R", "None","None","None", "None", dataframes)
-        
-        # Correspontent in study b 
-        else:
-            dataframes = compare_objects(obj,obj_b,dataframes)
-            study_b_visited_objects.append(obj_b)
+            try:
+                type = obj.type 
+                obj_key = obj.key 
+            except:
+                type = "Study Object"
+                obj_key = obj.key 
+            
+            #Get correspondet in study B 
+            obj_b = study_b.get_by_key(obj_key)
+          
+            #No correspontet object in study B
+            if not obj_b:  
+                dataframes= add_to_dataframe(type, obj_key, "R", "None","None","None", "None", dataframes)
+            
+            # Correspontent in study b 
+            else:
+                dataframes = compare_objects(obj,obj_b,dataframes)
+                study_b_visited_objects.append(obj_b)
+        except Exception as e:
+            logger.exception("Error comparing object in study %s: %s", obj_key if 'obj_key' in locals() else 'Unknown', e)
+            continue
         
 
     #Get remaining objects of study b: 
     all_objects=study_b.get_all_objects()
     for obj in all_objects:
-        if obj in study_b_visited_objects:
-            continue
-        
-        type = obj.type 
-        obj_key = obj.key
+        try:
+            if obj in study_b_visited_objects:
+                continue
+            
+            type = obj.type 
+            obj_key = obj.key
 
-        dataframes= add_to_dataframe(type, obj_key, "A", "None","None","None", "None", dataframes)
+            dataframes= add_to_dataframe(type, obj_key, "A", "None","None","None", "None", dataframes)
+        except Exception as e:
+            logger.exception("Error processing remaining object in study B: %s", e)
+            continue
 
     #Compare study object
     logger.info("Comparing Study Object")
@@ -302,41 +308,65 @@ def save__dataframes(differences):
     os.makedirs(output_dir, exist_ok=True)
 
     for filename, df in differences.items():
+        try:
+            df = df.fillna("None")
+            csv_name = f"{filename}.csv"
+            path = os.path.join(output_dir, csv_name)
 
-        df = df.fillna("None")
-        csv_name = f"{filename}.csv"
-        path = os.path.join(output_dir, csv_name)
-
-        # Save dataframe to CSV
-        df.to_csv(path, index=True)
-        logger.info("Saved %s", path)
+            # Save dataframe to CSV
+            df.to_csv(path, index=True)
+            logger.info("Saved %s", path)
+        except Exception as e:
+            logger.exception("Error saving dataframe %s: %s", filename, e)
+            continue
 
 
 def clean_outputs():
-    output_dir = ".\\helper\\compare_cases\\comparison_results"
+    BASE_DIR = Path(__file__).resolve().parent
+    output_dir = BASE_DIR / "comparison_results" 
 
     # Remove existents results
     if os.path.exists(output_dir) and os.path.isdir(output_dir):
         for item in os.listdir(output_dir):
             item_path = os.path.join(output_dir, item)
-
-            if os.path.isfile(item_path):
-                os.remove(item_path)  
-            elif os.path.isdir(item_path):
-                shutil.rmtree(item_path)  
+            try:
+                if os.path.isfile(item_path):
+                    os.remove(item_path)  
+                elif os.path.isdir(item_path):
+                    shutil.rmtree(item_path)  
+            except Exception as e:
+                logger.exception("Error removing output item %s: %s", item_path, e)
+                continue
 
         logger.info("Previous results from '%s' were deleted", output_dir)
 
 
 def compare_cases(study_path_a, study_path_b):
+    try:
+        #Load studies
+        study_a = psr.factory.load_study(study_path_a)
+        try:
+            study_a.save(study_path_a)
+        except Exception:
+            # non-fatal; continue even if save fails
+            logger.exception("Error saving study A to %s", study_path_a)
 
-    #Load studies
-    study_a = psr.factory.load_study(study_path_a)
-    study_b = psr.factory.load_study(study_path_b)
+        study_b = psr.factory.load_study(study_path_b)
+        try:
+            study_b.save(study_path_b)
+        except Exception:
+            logger.exception("Error saving study B to %s", study_path_b)
 
-    differences = compare_studies(study_a,study_b)
-    clean_outputs()
-    save__dataframes(differences)
+        differences = compare_studies(study_a,study_b)
+        try:
+            clean_outputs()
+        except Exception:
+            logger.exception("Error cleaning outputs before saving differences")
+
+        save__dataframes(differences)
+    except Exception as e:
+        logger.exception("Fatal error comparing cases: %s", e)
+        return
 
 
 if __name__== "__main__":
