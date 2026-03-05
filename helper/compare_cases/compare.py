@@ -1,4 +1,4 @@
-#version 1.6
+#version 2.0
 
 import psr.factory 
 import pandas as pd
@@ -15,7 +15,9 @@ logger = logging.getLogger("compare_cases")
 if not logger.handlers:
     logger.setLevel(logging.DEBUG)
     # File handler logs everything (INFO and above)
-    fh = logging.FileHandler("log.txt", mode="a", encoding="utf-8")
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    log_path = os.path.join(current_dir, "log.txt")
+    fh = logging.FileHandler(log_path, mode="a", encoding="utf-8")
     fh.setLevel(logging.DEBUG)
     fh_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     fh.setFormatter(fh_formatter)

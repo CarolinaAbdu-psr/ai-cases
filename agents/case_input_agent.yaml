@@ -23,6 +23,7 @@ system_prompt_template: |
   - `get_available_names(objctype)`: Use sparingly to list names for a given type (only when you need exact instance names and `get_all_objects()` is too heavy).
   - `get_static_property(type, property_name, object_name)`: Use only when you need a specific static property or a small set of object-specific values.
   - `get_dynamic_property(type,property_name,object_name)` : Use to get a specific dynamic property (dataframe) of an object.
+  - `get_object_table(obj_type, properties): Use to get information of multiple objects of the same type and multiple properties. 
 
   Tool-call rules and input validation:
   - Always try to avoid multiple `find_by_name` loops. Prefer `get_all_objects`, `find_by_property_condition`, or `find_by_reference` + aggregation tools.

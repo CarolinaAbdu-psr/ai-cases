@@ -215,43 +215,8 @@ def load_vectorstore() -> Chroma:
     raise ValueError(f"Vectorstore not found: {persist_directory}")
 
 
-def format_properties(docs: List) -> str:
-    """
-    Formats a list of retrieved documents into a context string
-    that includes availables properties
-    """
-    formatted_blocks = []
-    
-    available_objects = "The available objects to be used at study.find() or study.create() are the following: ACInterconnection, Area, Battery, Bus, BusShunt, Circuit, CircuitFlowConstraint, CSP, DCBus, DCLine, Demand, DemandSegment, Emission, FlowController, Fuel, FuelConsumption, FuelContract, FuelProducer, FuelReservoir, GasEmission, GasNode, GasPipeline, GenerationConstraint, GenericConstraint, HydroGenerator, HydroPlant, HydroPlantConnection, HydroStation, HydroStationConnection, Interconnection, InterpolationGenericConstraint, LCCConverter, LineReactor, Load, MTDCLink, PaymentSchedule, PowerInjection, RenewableCapacityProfile, RenewableGenerator, RenewablePlant, RenewableStation, RenewableTurbine, RenewableWindSpeedPoint, ReserveGeneration, ReservoirSet, SensitivityGroup, SeriesCapacitor, StaticVarCompensator, SumOfCircuits, SumOfInterconnections, SupplyChainDemand, SupplyChainDemandSegment, SupplyChainFixedConverter, SupplyChainFixedConverterCommodity, SupplyChainNode, SupplyChainProcess, SupplyChainProducer, SupplyChainStorage, SupplyChainTransport, SynchronousCompensator, System, TargetGeneration, ThermalCombinedCycle, ThermalGenerator, ThermalPlant, ThreeWindingsTransformer, Transformer, TransmissionLine, TwoTerminalDCLink, VSCConverter, Waterway, Zone"
-    
-    formatted_blocks.append(available_objects)
-
-    for i, doc in enumerate(docs):
-
-        # 1. Get object name and metadata (properties)
-        metadata = doc.metadata
-        objct_name = doc.page_content
-        
-        # 3. Create example
-        block = f"""
-        Object Name: {objct_name}
-
-        Madatory properties to create {objct_name}: {metadata.get("mandatory")}
-
-        Reference properties wich must be used to link objects: {metadata.get("references_objects")}
-
-        Static properties which can be acessed with .get(PropertyName) function and created by .set(PropertyName,value) function : {metadata.get("static_properties")}
-
-        Dynamic properties which can be acessed with .get_df(PropertyName) or .get_at(PropertyName, date) functions and created by .set_df(df) 
-        or .set_at(PropertyName, date, value) function : {metadata.get("dynamic_properties")}
-        """
-
-        formatted_blocks.append(block.strip())
-        
-    return "\n\n" + "\n\n".join(formatted_blocks)
-
 @tool
-def retrive_properties(state:AgentState)->str:
+def retrive_properties(obj_property_list: list)->str:
     """
     Retrieve detailed information about available object types and their properties from the SDDP study.
     
@@ -261,17 +226,25 @@ def retrive_properties(state:AgentState)->str:
     - What static properties can be accessed with tool get_static_property 
     - What dynamic properties can be accessed 
     - What reference properties link objects together
+
+    Args : A list with strings with the possible name of the object and the property (e.g. ["Hydro Plant Maximum Generation", "Thermal Plant Capacity"])
     
     Returns: Formatted documentation of available objects and their properties.
     Use the property names returned here when calling other tools.
     """
     try:
         vectorstore = load_vectorstore()
-        retriever = vectorstore.as_retriever(search_kwargs={"k": 6})
-        last_message_content = state["messages"][-1].content
-        docs = retriever.invoke(last_message_content)
-        properties_str = format_properties(docs)
-        return properties_str
+        retriever = vectorstore.as_retriever(search_kwargs={"k": 2 ,"filter": {"type":"Property"}}) 
+        retrived_artifacts = []
+        step_debug_info = []
+        for obj in obj_property_list: 
+            docs = retriever.invoke(obj)
+            for doc in docs:
+                artifact_description = doc.metadata.get("page_content", "No Content")
+                retrived_artifacts.append(artifact_description)
+                step_debug_info.append(artifact_description)
+
+        return retrived_artifacts
     except Exception as e:
         tb = traceback.format_exc()
         return f"TOOL_ERROR: retrive_properties failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify vectorstore exists and the last message content is valid."
@@ -722,6 +695,73 @@ def get_neighboors(obj_key, max_level=1):
     except Exception as e:
         tb = traceback.format_exc()
         return f"TOOL_ERROR: get_neighboors failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify obj_key and max_level."
+    
+@tool 
+def get_object_table(obj_type: str, raw_properties: list[str] ):
+    """
+    This tool returns a dataframe containing the values of selected properties
+    for all objects of a given type in the study. It is useful for obtaining
+    general information and comparing attributes across many objects at once.
+    First check the name of the properties with retrive_properties to use this tool. 
+
+    Args:
+        obj_type (str):
+            The type of object to query (e.g., ThermalPlant, Bus, ReserveArea).
+
+        raw_properties (list[str]):
+            A list of property names to retrieve for each object.
+
+    Returns:
+        Dataframe formated as dict:
+            A table where each row represents an object (indexed by its key)
+            and each column corresponds to a requested property.
+
+    Notes:
+        - This tool is best suited for retrieving **general information across
+          many objects of the same type**.
+        - If a requested property does not exist for the given object type,
+          it will be ignored.
+        - Reference properties are returned as object keys rather than full
+          object instances.
+    """
+    try:
+        # Load an object to check properties
+        obj = STUDY.find(obj_type)[0]
+        if not obj:
+            return f"No object of type {obj_type}"
+        
+        # Check existing properties
+        properties = []
+        for property in raw_properties:
+            if obj.has_property(property):
+                if len(obj.description(property).dimensions())>0:
+                    properties.append(f'{property}(:)') #Change to the correct name 
+                else:
+                    properties.append(property)
+            else:
+                print(f"no property called {property}")
+
+        # Get dataframe
+        df = STUDY.get_objects_values(obj_type,properties)
+        df.index = [index.key for index in df.index]
+        # Transform objects in key 
+        for col in df.columns:
+            try: 
+                if not obj.description(col).is_reference():
+                    continue
+            except:
+                pass
+            for i, value in df[col].items():
+                if isinstance(value,list):
+                    values = [v.key for v in value]
+                    df[col] = df[col].apply(lambda value: values if values is not None else None)
+                if isinstance(value,psr.factory.api.DataObject):
+                    df[col] = df[col].apply(lambda x: x.key if x is not None else None)
+        return df.to_dict(orient="index")
+    except Exception as e: 
+        tb = traceback.format_exc()
+        return f"TOOL_ERROR: get_informative_table failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify obj_type."
+
 
 def initialize(model: str, chat_language: str, study_path, agent_type: str = "factory") -> Tuple[StateGraph, MemorySaver]:
     """Initialize the LLM and return the compiled LangGraph workflow and memory."""
@@ -764,7 +804,7 @@ def create_langgraph_workflow(llm: BaseChatOpenAI):
 
     tools = [retrive_properties, get_available_objects, get_all_objects,get_object_summary, get_static_properties, get_dynamic_property,
             find_by_property_condition, count_by_property_condition, sum_by_property_condition,
-            find_by_reference, count_by_reference, count_objects_by_type, sum_property_by_reference,get_neighboors]
+            find_by_reference, count_by_reference, count_objects_by_type, sum_property_by_reference,get_neighboors,get_object_table]
     
     # Create agent with system prompt (as string, not list)
     agent = RAGAgent(llm, tools, SYSTEM_PROMPT_TEMPLATE)
