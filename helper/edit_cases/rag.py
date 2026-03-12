@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # Load environment variables from .env file
 load_dotenv()
 
-REQUEST_TIMEOUT = 120
+REQUEST_TIMEOUT = 1200
 MAX_TOKENS = 4096
 
 # Agent template settings
@@ -205,10 +205,15 @@ class RAGAgent:
 # Retrive context
 # -----------------------------
 
-def load_vectorstore() -> Chroma:
+def get_vectorstore_directory(name: str) -> str:
+    base_path = get_vectorstore_base_path()
+    return os.path.join(base_path, f'{name}_vectorstore')
+
+
+def load_vectorstore(directory) -> Chroma:
     """Load a Chroma vectorstore persisted in `vectorstore` directory."""
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-    persist_directory = "vectorstore"
+    persist_directory = os.path.join("vectorstore", directory)
     if os.path.exists(persist_directory):
         return Chroma(
             persist_directory=persist_directory,
@@ -218,94 +223,112 @@ def load_vectorstore() -> Chroma:
     raise ValueError(f"Vectorstore not found: {persist_directory}")
 
 
-def format_properties(docs: List) -> str:
-    """
-    Formats a list of retrieved documents into a context string
-    that includes availables properties
-    """
-    formatted_blocks = []
-    
-    available_objects = "The available objects to be used at study.find() or study.create() are the following: ACInterconnection, Area, Battery, Bus, BusShunt, Circuit, CircuitFlowConstraint, CSP, DCBus, DCLine, Demand, DemandSegment, Emission, FlowController, Fuel, FuelConsumption, FuelContract, FuelProducer, FuelReservoir, GasEmission, GasNode, GasPipeline, GenerationConstraint, GenericConstraint, HydroGenerator, HydroPlant, HydroPlantConnection, HydroStation, HydroStationConnection, Interconnection, InterpolationGenericConstraint, LCCConverter, LineReactor, Load, MTDCLink, PaymentSchedule, PowerInjection, RenewableCapacityProfile, RenewableGenerator, RenewablePlant, RenewableStation, RenewableTurbine, RenewableWindSpeedPoint, ReserveGeneration, ReservoirSet, SensitivityGroup, SeriesCapacitor, StaticVarCompensator, SumOfCircuits, SumOfInterconnections, SupplyChainDemand, SupplyChainDemandSegment, SupplyChainFixedConverter, SupplyChainFixedConverterCommodity, SupplyChainNode, SupplyChainProcess, SupplyChainProducer, SupplyChainStorage, SupplyChainTransport, SynchronousCompensator, System, TargetGeneration, ThermalCombinedCycle, ThermalGenerator, ThermalPlant, ThreeWindingsTransformer, Transformer, TransmissionLine, TwoTerminalDCLink, VSCConverter, Waterway, Zone"
-    
-    formatted_blocks.append(available_objects)
 
-    for i, doc in enumerate(docs):
+@tool 
+def retrive_artifacts(plan)->str:
+    """
+    Retrieves PSR Factory object schemas and property definitions from the documentation.
 
-        # 1. Get object name and metadata (properties)
-        metadata = doc.metadata
-        objct_name = doc.page_content
+    Call this tool BEFORE modifying or reading any object property, so you know:
+      - The exact object name to use (e.g., "ThermalPlant", not "Thermal Plant")
+      - The exact property name to use (e.g., "MaximumCapacity", not "Max Capacity")
+      - Whether the property is static (fixed value) or dynamic (time series)
+      - Reference properties (Ref*) that link objects to each other
+
+    --- VALID TYPES ---
+      - "Object"   : Schema and structure of a data object (e.g., ThermalPlant, Battery, HydroPlant)
+      - "Property" : A specific attribute of an object (e.g., MaximumCapacity, RefSystem)
+
+    --- HOW TO BUILD THE `plan` ARGUMENT ---
+    Break the user request into steps. Each step is a string with format:
+        "Step: <name> | Type: <type>"
+
+    Rules:
+      1. Always retrieve the Object before its Properties — you need the schema first.
+      2. For each property the user wants to read or edit, add a dedicated Property step.
+      3. To find how two objects relate, search for "Ref" properties (e.g., "ThermalPlant RefSystem").
+         Ref properties tell you the exact field name used to link one object to another.
+
+    --- EXAMPLES ---
+
+    # Edit a property
+    User: "I want to edit the installed capacity of my Thermal Plants"
+    plan = [
+        "Step: Thermal Plant | Type: Object",
+        "Step: Thermal Plant Maximum Capacity | Type: Property",
+    ]
+
+    # Edit multiple properties
+    User: "I want to update the min and max capacity of my Batteries"
+    plan = [
+        "Step: Battery | Type: Object",
+        "Step: Battery Maximum Capacity | Type: Property",
+        "Step: Battery Minimum Capacity | Type: Property",
+    ]
+
+    # Understand how objects relate
+    User: "How is a Thermal Plant connected to a Bus?"
+    plan = [
+        "Step: Thermal Plant | Type: Object",
+        "Step: Thermal Plant RefBus | Type: Property",
+    ]
+
+    Returns:
+        A deduplicated list of artifact descriptions, each containing:
+        the artifact name, type, full description (including static/dynamic context). It also breturns the available objects 
+        keys of a interesting type.
+    """
+
+    artifacts_json = f"factory_json_vectorstore"
+    all_docs = []
+    available_objects =  "Available Objects keys of interested type : "
+    inspected_types = []
+    seen_content = set()
+    
+    try: 
+        vectorstore = load_vectorstore(artifacts_json)
+        logger.info(f"Vectorstore loaded {vectorstore}")
+
+        for step in plan:
+            parts = step.split("|")
+            query_name = parts[0].replace("Step:", "").strip()
+            query_type = parts[1].replace("Type:", "").strip()
+            retriever = vectorstore.as_retriever(search_kwargs={"k": 2 ,"filter": {"type":query_type}}) 
+
+            step_debug_info = []
+            logger.info(f"Retrieving artifacts for step: {step} - Query Name = {query_name}; Query Type = {query_type}")
+            docs = retriever.invoke(query_name)
+            for doc in docs:
+
+                #Debug Info
+                artifact_name = doc.page_content
+                artifact_url = doc.metadata.get("url", "No URL")
+                artifact_type = doc.metadata.get("type", "No Type")
+                artifact_description = doc.metadata.get("page_content", "No Content")
+                
+                # Add doc info 
+                doc_info = f"Artifact Name: {artifact_name} \n Artifact Type: {artifact_type} \n Description: {artifact_description} \n"
+                step_debug_info.append(doc_info)
+                if doc.page_content not in seen_content:
+                    all_docs.append(doc_info)
+                    seen_content.add(artifact_name)
+
+                # Add available objects
+                obj_type = artifact_name.split()[0]
+                if obj_type not in inspected_types:
+                    objs = STUDY.find(obj_type)
+                    for obj in objs: 
+                        available_objects += f"{obj.key}; "
+                        inspected_types.append(obj_type)
+                
+
+            logger.info(f"Properties retrived:\n" + "\n".join(all_docs) + f"{available_objects}" )
+    except Exception as e: 
+        logger.error(f"Error retrieving artifacts: {e}")
         
-        # 3. Create example
-        block = f"""
-        Object Name: {objct_name}
+    logger.info(f"TOTAL UNIQUE DOCS RETRIEVED: {len(all_docs)}")
+    return f"Properties retrived:\n" + "\n".join(all_docs) + f"{available_objects}"
 
-        Madatory properties to create {objct_name}: {metadata.get("mandatory")}
-
-        Reference properties wich must be used to link objects: {metadata.get("references_objects")}
-
-        Static properties which can be acessed with .get(PropertyName) function and created by .set(PropertyName,value) function : {metadata.get("static_properties")}
-
-        Dynamic properties which can be acessed with .get_df(PropertyName) or .get_at(PropertyName, date) functions and created by .set_df(df) 
-        or .set_at(PropertyName, date, value) function : {metadata.get("dynamic_properties")}
-        """
-
-        formatted_blocks.append(block.strip())
-        
-    return "\n\n" + "\n\n".join(formatted_blocks)
-
-@tool
-def retrive_properties(state:AgentState)->str:
-    """
-    Retrieve detailed information about available object types and their properties from the SDDP study.
-    
-    Use this tool FIRST to understand:
-    - What object types exist (e.g., ThermalPlant, HydroPlant, Bus)
-    - What mandatory properties are needed to create each object
-    - What static properties can be accessed with tool get_static_property 
-    - What dynamic properties can be accessed 
-    - What reference properties link objects together
-    
-    Returns: Formatted documentation of available objects and their properties.
-    Use the property names returned here when calling other tools.
-    """
-    try:
-        vectorstore = load_vectorstore()
-        retriever = vectorstore.as_retriever(search_kwargs={"k": 6})
-        last_message_content = state["messages"][-1].content
-        docs = retriever.invoke(last_message_content)
-        properties_str = format_properties(docs)
-        return properties_str
-    except Exception as e:
-        tb = traceback.format_exc()
-        return f"TOOL_ERROR: retrive_properties failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify vectorstore exists and the last message content is valid."
-
-@tool
-def get_available_objects(obj_type):
-    """Get all names (list of available instances) for a given object type in the study.
-    
-    Args:
-        obj_type: The object type name (e.g., 'ThermalPlant', 'Bus', 'HydroPlant')
-        
-    Returns: String with description followed by dictionary mapping object keys to names.
-    
-    Use this to:
-    - See what instances exist before filtering by properties
-    - Match user-provided names with actual study objects
-    """
-    try:
-        description = f"Dict with key : name for all {obj_type} objects: "
-        name_id_map = {}
-        for obj in STUDY.find(obj_type):
-            name = ''
-            if obj.has_name:
-                name = obj.name.strip()
-            name_id_map[obj.key] = name
-        
-        return description + str(name_id_map)
-
-    except Exception as e:
-        tb = traceback.format_exc()
-        return f"TOOL_ERROR: get_available_names failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify object type name and that STUDY is loaded."
 
 def is_dataframe(obj,key): 
     """Check if the property is a dataframe"""
@@ -364,7 +387,8 @@ def rename_element(obj_key, new_name: str):
         if obj.has_name:
             older_name = obj.name.strip()
             obj.name = new_name
-        
+
+            logger.info(f"Object {obj} name updated from {older_name} to {new_name}")
             return f"Object {obj} name updated from {older_name} to {new_name}"
         else: 
             return f"Object {obj} has no name property"
@@ -390,7 +414,7 @@ def modify_element_code(obj_key, new_code: int):
     """
     try:
         obj = STUDY.get_by_key(obj_key)
-        if obj.has_id:
+        if obj.has_code:
             older_code = obj.code
             obj.code = new_code
         
@@ -427,22 +451,6 @@ def modify_element_key(obj_key, new_key: str):
         tb = traceback.format_exc()
         return f"TOOL_ERROR: count_objects_by_type failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify object type and STUDY."
 
-
-@tool
-def get_all_objects():
-    """Get all objects with its types, codes and names
-    
-    Returns: A list with all objects and its names 
-    
-    Use this to: 
-    - Find easy the names of more thant one object to use in other functions that the exact name is required
-    - Give a summary of the case and it's objets"""
-
-    try:
-        return STUDY.get_key_object_map()
-    except Exception as e:
-        tb = traceback.format_exc()
-        return f"TOOL_ERROR: get_all_objects failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: ensure STUDY is loaded and accessible."
 
 
 
@@ -481,12 +489,17 @@ def create_modification(obj_key,property:str, modifications: dict):
     """
     try: 
         obj = STUDY.get_by_key(obj_key)
+        values = {}
+        new_values = {}
         description = obj.description(property)
         if description.is_dynamic(): 
             for date,value  in modifications.items():
+                previous_value = obj.get_at(property,date)
+                values[date] = previous_value
                 obj.set_at(property,date,value)
-
-            return f"Add modifications to property {property}: {modifications}"
+                new_values[date]=obj.get_at(property,date)
+            logger.info(f"TOOL RESPONSE: Add modifications to property {property}. Previous values: {values}. New values: {new_values} ")
+            return f"Add modifications to property {property}. Previous values: {values}. New values: {new_values}"
 
         else: 
             return f"Property {property} does not change over time, it is a static value."
@@ -534,7 +547,7 @@ def initialize(model: str, chat_language: str, study_path, agent_type: str = "fa
     
 def create_langgraph_workflow(llm: BaseChatOpenAI):
 
-    tools = [retrive_properties, get_available_objects, get_all_objects,modify_element,rename_element,modify_element_code,
+    tools = [retrive_artifacts,modify_element,rename_element,modify_element_code,
             modify_element_key, create_modification]
     
     # Create agent with system prompt (as string, not list)
@@ -543,19 +556,6 @@ def create_langgraph_workflow(llm: BaseChatOpenAI):
     app,memory = agent._initialize_workflow()
     
     return app, memory
-
-# -------------------------------------------------------
-# Vectorstore download functions
-#--------------------------------------------------------
-
-# Delegate to common RAG utilities
-get_rag_list = rag_common.get_rag_list
-get_rag_list_with_dates = rag_common.get_rag_list_with_dates
-extract_rag_to_folder = rag_common.extract_rag_to_folder
-get_latest_rag_date = rag_common.get_latest_rag_date
-download_rag = rag_common.download_rag
-download_latest_rag = rag_common.download_latest_rag
-
 
 
 
