@@ -347,7 +347,7 @@ def download_rag(rag_name: str, chroma_dir_name: str, source_type: str = None) -
     raise ValueError(f"RAG {rag_name} not found in the RAG list with dates.")
 
 
-def download_latest_rag(chroma_dir_name: str, source_type: str = "factory") -> dt.datetime:
+def download_latest_rag(chroma_dir_name: str, source_type: str = "factory_json") -> dt.datetime:
     """Get the latest available RAG from a specific source type
 
     Supports backward compatibility with old naming format for factory type.

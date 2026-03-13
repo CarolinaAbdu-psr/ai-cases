@@ -155,12 +155,12 @@ class SessionManager:
             logger.error(f"Error initializing RAG for {agent_type}: {str(e)}")
             return dt.datetime.now()
 
-    def _check_latest_rag(self, source_type: str) -> dt.datetime:
+    def _check_latest_rag(self, source_type: str, vectorstore:str) -> dt.datetime:
         """Check latest RAG date"""
-        rag = self._get_rag_module(source_type.split('_')[0])
-        return rag.get_latest_rag_date(source_type)
+        rag = self._get_rag_module(source_type)
+        return rag.get_latest_rag_date(vectorstore)
 
-    def _download_rag(self, agent_type: str, force: bool = False) -> dt.datetime:
+    def _download_rag(self, agent_type: str, vectorstore: str, force: bool = False) -> dt.datetime:
         """Download RAG for an agent type
 
         Args:
@@ -171,7 +171,7 @@ class SessionManager:
             datetime: The date of the RAG version
         """
         rag = self._get_rag_module(agent_type)
-        persist_directory = rag.get_vectorstore_directory(agent_type)
+        persist_directory = rag.get_vectorstore_directory(vectorstore)
         rag_date_file = os.path.join(persist_directory, "rag_date.txt")
         rag_version_file = os.path.join(persist_directory, "rag_version.txt")
 
@@ -189,8 +189,8 @@ class SessionManager:
 
         try:
             # Get the latest RAG date and construct expected filename
-            latest_rag_date = self._check_latest_rag(source_type)
-            expected_rag_filename = f"rag_{source_type}_{latest_rag_date.strftime('%Y-%m-%d_%H-%M-%S')}.zip"
+            latest_rag_date = self._check_latest_rag(agent_type,vectorstore)
+            expected_rag_filename = f"rag_{vectorstore}_{latest_rag_date.strftime('%Y-%m-%d_%H-%M-%S')}.zip"
 
             # Check if we already have this version
             if not force and existing_version == expected_rag_filename:
@@ -213,7 +213,7 @@ class SessionManager:
             else:
                 logger.info(f"📥 Downloading RAG for {agent_type} (first time)")
 
-            rag_date = rag.download_latest_rag(persist_directory, source_type)
+            rag_date = rag.download_latest_rag(persist_directory, vectorstore)
 
             # Save the version (ZIP filename) and date
             with open(rag_version_file, "w") as f:
@@ -410,18 +410,16 @@ class GatewayService:
         """Preload all RAG vectorstores on startup"""
         logger.info("Preloading RAG vectorstores for all agents...")
 
-        agents_to_preload = [
-            ("case_input", ["case_input"]),
-            ("case_compare",["case_compare"]),
-            ("case_output",["case_output"]),
-            ("case_edit",["case_edit"])
+        vectorstores_to_preload = [
+            ("case_input", ["factory_json"]),
+            ("case_edit", ["factory_json"])
         ]
 
-        for agent_name, agent_types in agents_to_preload:
+        for agent_name, vectorstores in vectorstores_to_preload:
             logger.info(f"→ Preloading {agent_name} RAGs...")
             try:
-                for agent_type in agent_types:
-                    self.session_manager._download_rag(agent_type, force=False)
+                for vectorstore in vectorstores:
+                    self.session_manager._download_rag(agent_name, vectorstore ,force=False)
                 logger.info(f"✓ {agent_name} RAGs loaded")
             except Exception as e:
                 logger.error(f"✗ Error preloading {agent_name}: {str(e)}")
@@ -471,7 +469,7 @@ class GatewayService:
             for agent_type in agent_types:
                 try:
                     rag = self.session_manager._get_rag_module(agent_type)
-                    persist_directory = rag.get_vectorstore_directory(agent_type)
+                    persist_directory = rag.get_vectorstore_directory('factory_json')
                     rag_version_file = os.path.join(persist_directory, "rag_version.txt")
                     rag_date_file = os.path.join(persist_directory, "rag_date.txt")
 

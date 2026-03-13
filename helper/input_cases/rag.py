@@ -10,7 +10,7 @@ import psr.factory
 import logging
 import traceback
 
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, BaseMessage, AnyMessage, ToolMessage
+from langchain_core.messages import SystemMessage, AnyMessage, ToolMessage
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_openai.chat_models.base import BaseChatOpenAI
 from langchain_core.tools import tool
@@ -201,11 +201,15 @@ class RAGAgent:
 # -----------------------------
 # Retrive context
 # -----------------------------
+def get_vectorstore_directory(name: str) -> str:
+    base_path = get_vectorstore_base_path()
+    return os.path.join(base_path, f'{name}_vectorstore')
 
-def load_vectorstore() -> Chroma:
+
+def load_vectorstore(directory) -> Chroma:
     """Load a Chroma vectorstore persisted in `vectorstore` directory."""
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-    persist_directory = "vectorstore"
+    persist_directory = os.path.join("vectorstores", directory)
     if os.path.exists(persist_directory):
         return Chroma(
             persist_directory=persist_directory,
@@ -215,39 +219,111 @@ def load_vectorstore() -> Chroma:
     raise ValueError(f"Vectorstore not found: {persist_directory}")
 
 
-@tool
-def retrive_properties(obj_property_list: list)->str:
+@tool 
+def retrive_artifacts(plan)->str:
     """
-    Retrieve detailed information about available object types and their properties from the SDDP study.
-    
-    Use this tool FIRST to understand:
-    - What object types exist (e.g., ThermalPlant, HydroPlant, Bus)
-    - What mandatory properties are needed to create each object
-    - What static properties can be accessed with tool get_static_property 
-    - What dynamic properties can be accessed 
-    - What reference properties link objects together
+    Retrieves PSR Factory object schemas and property definitions from the documentation.
 
-    Args : A list with strings with the possible name of the object and the property (e.g. ["Hydro Plant Maximum Generation", "Thermal Plant Capacity"])
-    
-    Returns: Formatted documentation of available objects and their properties.
-    Use the property names returned here when calling other tools.
+    Call this tool BEFORE modifying or reading any object property, so you know:
+      - The exact object name to use (e.g., "ThermalPlant", not "Thermal Plant")
+      - The exact property name to use (e.g., "MaximumCapacity", not "Max Capacity")
+      - Whether the property is static (fixed value) or dynamic (time series)
+      - Reference properties (Ref*) that link objects to each other
+
+    --- VALID TYPES ---
+      - "Object"   : Schema and structure of a data object (e.g., ThermalPlant, Battery, HydroPlant)
+      - "Property" : A specific attribute of an object (e.g., MaximumCapacity, RefSystem)
+
+    --- HOW TO BUILD THE `plan` ARGUMENT ---
+    Break the user request into steps. Each step is a string with format:
+        "Step: <name> | Type: <type>"
+
+    Rules:
+      1. Always retrieve the Object before its Properties — you need the schema first.
+      2. For each property the user wants to read or edit, add a dedicated Property step.
+      3. To find how two objects relate, search for "Ref" properties (e.g., "ThermalPlant RefSystem").
+         Ref properties tell you the exact field name used to link one object to another.
+
+    --- EXAMPLES ---
+
+    # Edit a property
+    User: "I want to edit the installed capacity of my Thermal Plants"
+    plan = [
+        "Step: Thermal Plant | Type: Object",
+        "Step: Thermal Plant Maximum Capacity | Type: Property",
+    ]
+
+    # Edit multiple properties
+    User: "I want to update the min and max capacity of my Batteries"
+    plan = [
+        "Step: Battery | Type: Object",
+        "Step: Battery Maximum Capacity | Type: Property",
+        "Step: Battery Minimum Capacity | Type: Property",
+    ]
+
+    # Understand how objects relate
+    User: "How is a Thermal Plant connected to a Bus?"
+    plan = [
+        "Step: Thermal Plant | Type: Object",
+        "Step: Thermal Plant RefBus | Type: Property",
+    ]
+
+    Returns:
+        A deduplicated list of artifact descriptions, each containing:
+        the artifact name, type, full description (including static/dynamic context). It also breturns the available objects 
+        keys of a interesting type.
     """
-    try:
-        vectorstore = load_vectorstore()
-        retriever = vectorstore.as_retriever(search_kwargs={"k": 2 ,"filter": {"type":"Property"}}) 
-        retrived_artifacts = []
-        step_debug_info = []
-        for obj in obj_property_list: 
-            docs = retriever.invoke(obj)
+
+    artifacts_json = f"factory_json_vectorstore"
+    all_docs = []
+    available_objects =  "Available Objects keys of interested type : "
+    inspected_types = []
+    seen_content = set()
+    
+    try: 
+        vectorstore = load_vectorstore(artifacts_json)
+        logger.info(f"Vectorstore loaded {vectorstore}")
+
+        for step in plan:
+            parts = step.split("|")
+            query_name = parts[0].replace("Step:", "").strip()
+            query_type = parts[1].replace("Type:", "").strip()
+            retriever = vectorstore.as_retriever(search_kwargs={"k": 2 ,"filter": {"type":query_type}}) 
+
+            step_debug_info = []
+            logger.info(f"Retrieving artifacts for step: {step} - Query Name = {query_name}; Query Type = {query_type}")
+            docs = retriever.invoke(query_name)
             for doc in docs:
-                artifact_description = doc.metadata.get("page_content", "No Content")
-                retrived_artifacts.append(artifact_description)
-                step_debug_info.append(artifact_description)
 
-        return retrived_artifacts
-    except Exception as e:
-        tb = traceback.format_exc()
-        return f"TOOL_ERROR: retrive_properties failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify vectorstore exists and the last message content is valid."
+                #Debug Info
+                artifact_name = doc.page_content
+                artifact_type = doc.metadata.get("type", "No Type")
+                artifact_description = doc.metadata.get("page_content", "No Content")
+                
+                # Add doc info 
+                doc_info = f"Artifact Name: {artifact_name} \n Artifact Type: {artifact_type} \n Description: {artifact_description} \n"
+                step_debug_info.append(doc_info)
+                if doc.page_content not in seen_content:
+                    all_docs.append(doc_info)
+                    seen_content.add(artifact_name)
+
+                # Add available objects
+                obj_type = artifact_name.split()[0]
+                if obj_type not in inspected_types:
+                    objs = STUDY.find(obj_type)
+                    for obj in objs: 
+                        available_objects += f"{obj.key}; "
+                        inspected_types.append(obj_type)
+                
+
+            logger.info(f"Properties retrived:\n" + "\n".join(all_docs) + f"{available_objects}" )
+    except Exception as e: 
+        logger.error(f"Error retrieving artifacts: {e}")
+        
+    logger.info(f"TOTAL UNIQUE DOCS RETRIEVED: {len(all_docs)}")
+    return f"Properties retrived:\n" + "\n".join(all_docs) + f"{available_objects}"
+
+
 
 @tool
 def get_available_objects(obj_type:str):
@@ -802,7 +878,7 @@ def initialize(model: str, chat_language: str, study_path, agent_type: str = "fa
     
 def create_langgraph_workflow(llm: BaseChatOpenAI):
 
-    tools = [retrive_properties, get_available_objects, get_all_objects,get_object_summary, get_static_properties, get_dynamic_property,
+    tools = [retrive_artifacts, get_available_objects, get_all_objects,get_object_summary, get_static_properties, get_dynamic_property,
             find_by_property_condition, count_by_property_condition, sum_by_property_condition,
             find_by_reference, count_by_reference, count_objects_by_type, sum_property_by_reference,get_neighboors,get_object_table]
     

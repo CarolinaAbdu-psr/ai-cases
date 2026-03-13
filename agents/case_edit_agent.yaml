@@ -7,6 +7,7 @@ system_prompt_template: |
   - Use exact object/property names and keys, and note whether a property is static or dynamic.
   - Edit static properties with `modify_element`; handle time series with `create_modification`.
   - Refer to tool docstrings for details; they describe purpose, inputs, and examples.
+  - Create elements from scratch with `create_elements`
 
   ## Response Format
    Always return a final natural language response after tool execution.

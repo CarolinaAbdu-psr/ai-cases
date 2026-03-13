@@ -1,16 +1,15 @@
-import json
-import argparse
 import yaml
 import datetime as dt
 import os
 import operator
 from typing import Tuple, List, Annotated, Dict, Any
+import uuid
 import psr.factory
 
 import logging
 import traceback
-
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, BaseMessage, AnyMessage, ToolMessage
+from helper import rag_common
+from langchain_core.messages import SystemMessage,AnyMessage, ToolMessage
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_openai.chat_models.base import BaseChatOpenAI
 from langchain_core.tools import tool
@@ -23,7 +22,6 @@ from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
 from typing_extensions import TypedDict
 from helper.common import get_vectorstore_base_path
-from helper import rag_common
 
 
 logging.basicConfig(level=logging.INFO)
@@ -213,7 +211,7 @@ def get_vectorstore_directory(name: str) -> str:
 def load_vectorstore(directory) -> Chroma:
     """Load a Chroma vectorstore persisted in `vectorstore` directory."""
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-    persist_directory = os.path.join("vectorstore", directory)
+    persist_directory = os.path.join("vectorstores", directory)
     if os.path.exists(persist_directory):
         return Chroma(
             persist_directory=persist_directory,
@@ -302,7 +300,6 @@ def retrive_artifacts(plan)->str:
 
                 #Debug Info
                 artifact_name = doc.page_content
-                artifact_url = doc.metadata.get("url", "No URL")
                 artifact_type = doc.metadata.get("type", "No Type")
                 artifact_description = doc.metadata.get("page_content", "No Content")
                 
@@ -344,9 +341,7 @@ def modify_element(obj_key, property, value):
     """Edit a given property of an object (don't use to change name, code or id)
     
     Args:
-        object_type: The object type name (e.g., 'ThermalPlant', 'Bus', 'HydroPlant')
-        code: the code of the object (can be None since the name is not none)
-        name: the name of the given object (can be none since code is not none)
+        obj_key : The key of the element to be mofied retrived wit the tool retrive_artifacts
         property: name of the desired option to change
         value: the new value to set to the property of the object 
         
@@ -360,10 +355,15 @@ def modify_element(obj_key, property, value):
         if obj:
             older_value = obj.get(property)
             obj.set(property,value) 
-        
-        return f"Object {obj} property {property} updated from {older_value} to {value}"
+            new_value = obj.get(property)
+            logger.info(f"Object {obj} property {property} updated from {older_value} to {new_value}")
+            return f"Object {obj} property {property} updated from {older_value} to {new_value}"
+        else: 
+            logger.info(f"No object with key {obj_key}")
+            return f"No object with key {obj_key}"
     except Exception as e:
         tb = traceback.format_exc()
+        logger.error(f"TOOL_ERROR: modify_element failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify object type and STUDY.")
         return f"TOOL_ERROR: modify_element failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify object type and STUDY."
 
 @tool   
@@ -388,8 +388,8 @@ def rename_element(obj_key, new_name: str):
             older_name = obj.name.strip()
             obj.name = new_name
 
-            logger.info(f"Object {obj} name updated from {older_name} to {new_name}")
-            return f"Object {obj} name updated from {older_name} to {new_name}"
+            logger.info(f"Object {obj} name updated from {older_name} to {obj.name}")
+            return f"Object {obj} name updated from {older_name} to {obj.name}"
         else: 
             return f"Object {obj} has no name property"
 
@@ -417,14 +417,15 @@ def modify_element_code(obj_key, new_code: int):
         if obj.has_code:
             older_code = obj.code
             obj.code = new_code
-        
-            return f"Object {obj} name updated from {older_code} to {new_code}"
-        else: 
+            logger.info(f"Object {obj} name updated from {older_code} to {obj.code}")
+            return f"Object {obj} name updated from {older_code} to {obj.code}"
+        else:
+            logger.info(f"Object {obj} has no code property") 
             return f"Object {obj} has no code property"
 
     except Exception as e:
         tb = traceback.format_exc()
-        return f"TOOL_ERROR: count_objects_by_type failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify object type and STUDY."
+        return f"TOOL_ERROR: modify_element_code failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify object type and STUDY."
 
 @tool   
 def modify_element_key(obj_key, new_key: str):
@@ -444,15 +445,12 @@ def modify_element_key(obj_key, new_key: str):
     try:
         obj = STUDY.get_by_key(obj_key)
         obj.key = new_key
-        return f"Object {obj} name updated from {obj_key} to {new_key}"
-       
+        logger.info(f"Object {obj} name updated from {obj_key} to {obj.key}")
+        return f"Object {obj} name updated from {obj_key} to {new_key}"    
 
     except Exception as e:
         tb = traceback.format_exc()
-        return f"TOOL_ERROR: count_objects_by_type failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify object type and STUDY."
-
-
-
+        return f"TOOL_ERROR: modify_element_key failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: verify object type and STUDY."
 
 @tool 
 def create_modification(obj_key,property:str, modifications: dict):
@@ -502,10 +500,163 @@ def create_modification(obj_key,property:str, modifications: dict):
             return f"Add modifications to property {property}. Previous values: {values}. New values: {new_values}"
 
         else: 
+            logger.info(f"Property {property} does not change over time, it is a static value.")
             return f"Property {property} does not change over time, it is a static value."
     except Exception as e:
         tb = traceback.format_exc()
         return f"TOOL_ERROR: get_all_objects failed: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggested action: ensure STUDY is loaded and accessible."
+    
+
+
+def get_mandatory_refs_identifier(obj_type):
+    obj = STUDY.create(obj_type)
+    obj_dict = obj.as_dict()
+    refs = []
+    for property in obj_dict.keys():
+        if obj.description(property).is_reference():
+            refs.append[property]
+    return refs
+
+def register_name(obj,obj_type,name,comments):
+    # Name property
+    if name and obj.has_name:
+        obj.name = name 
+        comments += f"Name: {obj.name}\n"
+    elif not name and obj.has_name:
+        obj.name = f"{obj_type}_{uuid.uuid4().hex[:6]}"
+        comments += f"Automatic Name: {obj.name}\n "
+    return comments
+
+def register_code(obj,obj_type,code,comments):
+    if code and obj.has_code:
+        if len(STUDY.find_by_code[code])==0:
+            obj.code = code
+            comments += f"Code: {obj.code}\n"
+        else: 
+            last_code = STUDY.find(obj_type)[-1].code
+            obj.code = last_code +1
+            obj.code = code
+            comments += f"Code provided {code} was not available. Code registered: {obj.code}\n"
+    elif not code and obj.has_code:
+        last_code = STUDY.find(obj_type)[-1].code
+        obj.code = last_code +1
+        comments += f"Automatic Code: {obj.code}\n"
+    return comments
+
+def register_id(obj,id,comments):
+    if id and obj.has_id:
+        obj.id = id 
+        comments += f"ID: {obj.id}\n"
+    elif not id and obj.has_id:
+        obj.id = f"{uuid.uuid4().hex[:2]}"
+        comments += f"Automatic id: {obj.id}\n "
+    return comments  
+
+def register_keys(obj, key, comments):
+    if key:
+        obj.key = key
+        comments += f"Key: {obj.key}\n"
+    else:
+        obj.key = f"{obj.name} [{obj.code}]\n"
+        comments += f"Automatic Key: {obj.key}\n"
+    return comments
+
+@tool 
+def create_element(obj_type:str, name:str= None, code:int =None, key:str=None, id=None,  properties:dict={}):
+    """
+    Creates a new element within the STUDY environment and registers its properties.
+    
+    This tool should be used whenever a new object (e.g., 'System', 'Fuel') 
+    needs to be instantiated. The tool automatically handles mandatory references 
+    by assigning 'Default' values if they are not explicitly provided.
+
+    Args:
+        obj_type (str): Mandatory. The type of object to create (e.g., "System").
+        name (str, optional): A suggestive name for the element. 
+            Constraint: Maximum 12 characters. 
+            The final object key will follow the pattern: "Name [code]".
+        id (str, optional): Unique identifier for the object
+            Constraint: Maximum 2 characters.
+        key (str, optional): Specific key for the object.
+        code (int, optional): Unique code for the object. 
+            Note: Avoid providing this unless necessary, as codes must be unique 
+            across the study.
+        properties (dict, optional): A dictionary of property names and values to set.
+            - If a mandatory reference property is missing, the tool will 
+              automatically find and assign the first available object of that type.
+            - Supports both single references and lists of references.
+
+    Returns:
+        str: A log of the creation process, including all set properties 
+            and default assignments.
+    """
+
+    obj = STUDY.create(obj_type)
+    comments = f"Object of type {obj_type} created\n"
+
+    # Basic properties
+    comments = register_name(obj, obj_type,name,comments)
+    comments = register_code(obj,obj_type,code,comments)
+    comments = register_keys(obj, key, comments)
+    comments = register_id(obj,id,comments)
+
+    # Set properties
+    for property_name in obj.descriptions().keys():
+        property_description = obj.description(property_name)
+        if property_name in properties.keys():
+
+            # Set defined references 
+            if property_description.is_reference():
+                ref_obj_key = properties[property_name]
+
+                # List
+                if isinstance(ref_obj_key,list):
+                    # case where the user gave a list of objects 
+                    obj.set(property_name,ref_obj_key)
+                else: 
+                    if "List" in property_description.type_description():
+                        obj.set(property_name,[ref_obj_key])
+                        comments += f"Reference {property_name}: [{ref_obj_key}]\n"
+                    else:
+                        obj.set(property_name,ref_obj_key)
+                        comments += f"Reference {property_name}: {ref_obj_key}\n"
+
+            # Set other properties
+            else: 
+                try: 
+                    value = properties[property_name]
+                    obj.set(property_name,value)
+                    comments += f"Property {property_name}: {value}"
+                except:
+                    continue
+
+        
+        # Set default references
+        elif property_description.is_reference() and property_description.is_required():
+            try: 
+                desc_type = property_description.type_description()
+                if "List" in desc_type:
+                    ref_obj_type = desc_type.split()[-1][:-1] # "List of DataObject of type(s): Fuel" -> Fuel
+                    ref_obj = STUDY.find(ref_obj_type)[0]
+                    obj.set(property_name,[ref_obj])
+                    comments += f"Default Reference {property_name}: [{ref_obj}]\n"
+                else:
+                    ref_obj_type = desc_type.strip() # System 
+                    ref_obj = STUDY.find(ref_obj_type)[0]
+                    obj.set(property_name,ref_obj)
+                    comments += f"Default Reference {property_name}: {ref_obj}\n"
+            except Exception as e: 
+                print(f"{e}")
+                continue
+
+    try: 
+        STUDY.add(obj)  
+        logger.info(comments)  
+        return comments
+    except Exception as e:
+        tb = traceback.format_exc()
+        return f"TOOL_ERROR: create_element: {type(e).__name__}: {str(e)}\nTraceback:\n{tb}\nSuggestion: Abort actions."
+
 
 
 def initialize(model: str, chat_language: str, study_path, agent_type: str = "factory") -> Tuple[StateGraph, MemorySaver]:
@@ -548,7 +699,7 @@ def initialize(model: str, chat_language: str, study_path, agent_type: str = "fa
 def create_langgraph_workflow(llm: BaseChatOpenAI):
 
     tools = [retrive_artifacts,modify_element,rename_element,modify_element_code,
-            modify_element_key, create_modification]
+            modify_element_key, create_modification,create_element]
     
     # Create agent with system prompt (as string, not list)
     agent = RAGAgent(llm, tools, SYSTEM_PROMPT_TEMPLATE)
@@ -557,5 +708,15 @@ def create_langgraph_workflow(llm: BaseChatOpenAI):
     
     return app, memory
 
+# -------------------------------------------------------
+# Vectorstore download functions
+#--------------------------------------------------------
 
+# Delegate to common RAG utilities
 
+get_rag_list = rag_common.get_rag_list
+get_rag_list_with_dates = rag_common.get_rag_list_with_dates
+extract_rag_to_folder = rag_common.extract_rag_to_folder
+get_latest_rag_date = rag_common.get_latest_rag_date
+download_rag = rag_common.download_rag
+download_latest_rag = rag_common.download_latest_rag
